@@ -1,5 +1,5 @@
 {
-	"id": "wrap-pdf",
+	"id": "pdf-wrapper",
 	"name": "PDF Wrapper",
 	"version": "1.0.0",
 	"minAppVersion": "1.4.10",
