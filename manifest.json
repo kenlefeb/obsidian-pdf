@@ -1,11 +1,10 @@
 {
-	"id": "sample-plugin",
-	"name": "Sample Plugin",
+	"id": "wrap-pdf",
+	"name": "Wrap PDF",
 	"version": "1.0.0",
-	"minAppVersion": "0.15.0",
-	"description": "Demonstrates some of the capabilities of the Obsidian API.",
-	"author": "Obsidian",
-	"authorUrl": "https://obsidian.md",
-	"fundingUrl": "https://obsidian.md/pricing",
+	"minAppVersion": "1.4.10",
+	"description": "Wraps a PDF file with a markdown note using a configurable template.",
+	"author": "Kenneth LeFebvre",
+	"authorUrl": "https://github.com/kenlefeb",
 	"isDesktopOnly": false
 }
