@@ -1,18 +1,33 @@
 import { AbstractInputSuggest, App, PluginSettingTab, Setting, TFile } from "obsidian";
-import type WrapPdfPlugin from "./main";
+import type PdfWrapperPlugin from "./main.ts";
 
-export interface WrapPdfSettings {
-	templatePath: string;
+interface VaultWithConfig {
+	getConfig(key: string): unknown;
 }
 
-export const DEFAULT_SETTINGS: WrapPdfSettings = {
-	templatePath: '',
-};
+export class PdfWrapperSettings {
+	templatePath = "";
+	private _attachmentsPath?: string;
 
-export class WrapPdfSettingTab extends PluginSettingTab {
-	plugin: WrapPdfPlugin;
+	constructor(private app: App) {}
 
-	constructor(app: App, plugin: WrapPdfPlugin) {
+	get attachmentsPath(): string {
+		if (this._attachmentsPath === undefined) {
+			const raw = (this.app.vault as unknown as VaultWithConfig).getConfig("attachmentFolderPath");
+			this._attachmentsPath = typeof raw === "string" ? raw : "";
+		}
+		return this._attachmentsPath;
+	}
+
+	set attachmentsPath(value: string) {
+		this._attachmentsPath = value;
+	}
+}
+
+export class PdfWrapperSettingTab extends PluginSettingTab {
+	plugin: PdfWrapperPlugin;
+
+	constructor(app: App, plugin: PdfWrapperPlugin) {
 		super(app, plugin);
 		this.plugin = plugin;
 	}

@@ -1,11 +1,10 @@
+/* eslint-disable @typescript-eslint/no-explicit-any, @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call */
 import { App, normalizePath, TFile, TFolder } from "obsidian";
-import type { WrapPdfSettings } from "./settings";
+import type { PdfWrapperSettings } from "./settings.ts";
 
-/* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-explicit-any */
-
-export async function wrapPdf(app: App, settings: WrapPdfSettings, pdfFile: TFile): Promise<void> {
+export async function wrapPdf(app: App, settings: PdfWrapperSettings, pdfFile: TFile): Promise<void> {
 	const originalFolder = pdfFile.parent;
-	if (!originalFolder) throw new Error("Cannot determine PDF parent folder");
+	if (!originalFolder) throw new Error("Cannot determine the PDF's parent folder");
 
 	const pdfBasename = pdfFile.basename;
 	const pdfName = pdfFile.name;
@@ -24,13 +23,13 @@ export async function wrapPdf(app: App, settings: WrapPdfSettings, pdfFile: TFil
 	const templatePath = settings.templatePath.endsWith(".md")
 		? settings.templatePath
 		: `${settings.templatePath}.md`;
-	const templateFile = app.vault.getAbstractFileByPath(templatePath);
+	const templateFile = app.vault.getAbstractFileByPath(templatePath) as TFile | null;
 	if (!(templateFile instanceof TFile)) {
 		throw new Error(`Template not found: ${templatePath}`);
 	}
 
 	// 1. Move PDF to the configured attachment folder
-	const attachmentFolder = resolveAttachmentFolder(app, originalFolder);
+	const attachmentFolder = resolveAttachmentFolder(settings, originalFolder);
 	await ensureFolder(app, attachmentFolder);
 
 	const newPdfPath = attachmentFolder
@@ -62,8 +61,8 @@ export async function wrapPdf(app: App, settings: WrapPdfSettings, pdfFile: TFil
  * Resolve the Obsidian "Default location for new attachments" setting
  * relative to the note's original folder.
  */
-function resolveAttachmentFolder(app: App, noteFolder: TFolder): string {
-	const raw: string | undefined = (app.vault as any).getConfig("attachmentFolderPath");
+function resolveAttachmentFolder(settings: PdfWrapperSettings, noteFolder: TFolder): string {
+	const raw = settings.attachmentsPath;
 
 	// Vault root (default)
 	if (!raw || raw === "/") return "";

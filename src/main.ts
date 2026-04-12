@@ -1,9 +1,9 @@
 import { Notice, Plugin, TFile } from 'obsidian';
-import { DEFAULT_SETTINGS, WrapPdfSettings, WrapPdfSettingTab } from "./settings";
-import { wrapPdf } from "./wrap-pdf";
+import { PdfWrapperSettings, PdfWrapperSettingTab } from "./settings.ts";
+import { wrapPdf } from "./pdf-wrapper.ts";
 
-export default class WrapPdfPlugin extends Plugin {
-	settings: WrapPdfSettings;
+export default class PdfWrapperPlugin extends Plugin {
+	settings!: PdfWrapperSettings;
 
 	async onload() {
 		await this.loadSettings();
@@ -20,13 +20,12 @@ export default class WrapPdfPlugin extends Plugin {
 			})
 		);
 
-		this.addSettingTab(new WrapPdfSettingTab(this.app, this));
+		this.addSettingTab(new PdfWrapperSettingTab(this.app, this));
 	}
 
 	private async handleWrapPdf(pdfFile: TFile) {
 		if (!this.settings.templatePath) {
-			// eslint-disable-next-line obsidianmd/ui/sentence-case
-			new Notice('No PDF template configured. Set one in Wrap PDF settings.');
+			new Notice('No PDF template configured. Set one in PDF wrapper settings.');
 			return;
 		}
 
@@ -40,7 +39,8 @@ export default class WrapPdfPlugin extends Plugin {
 	}
 
 	async loadSettings() {
-		this.settings = Object.assign({}, DEFAULT_SETTINGS, await this.loadData() as Partial<WrapPdfSettings>);
+		this.settings = new PdfWrapperSettings(this.app);
+		Object.assign(this.settings, await this.loadData() as Partial<PdfWrapperSettings>);
 	}
 
 	async saveSettings() {
