@@ -1,6 +1,6 @@
 {
-	"id": "wrap-pdf",
-	"name": "Wrap PDF",
+	"id": "pdf-wrapper",
+	"name": "PDF Wrapper",
 	"version": "1.0.0",
 	"minAppVersion": "1.4.10",
 	"description": "Wraps a PDF file with a markdown note using a configurable template.",
