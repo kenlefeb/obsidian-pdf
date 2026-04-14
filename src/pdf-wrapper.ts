@@ -84,6 +84,36 @@ async function ensureFolder(app: App, path: string): Promise<void> {
 	await app.vault.createFolder(path);
 }
 
+interface TemplaterPlugin {
+	templater: {
+		create_new_note_from_template: (
+			template: TFile,
+			folder: TFolder,
+			filename: string,
+			openNewNote: boolean,
+		) => Promise<TFile | undefined>;
+	};
+}
+
+function getTemplaterPlugin(app: App): TemplaterPlugin | null {
+	try {
+		const plugins = (app as unknown as { plugins?: { plugins?: Record<string, unknown> } }).plugins?.plugins;
+		const plugin = plugins?.["templater-obsidian"];
+		if (
+			plugin &&
+			typeof plugin === "object" &&
+			"templater" in plugin &&
+			(plugin as Record<string, unknown>).templater &&
+			typeof (plugin as TemplaterPlugin).templater.create_new_note_from_template === "function"
+		) {
+			return plugin as TemplaterPlugin;
+		}
+	} catch (e) {
+		console.warn("Wrap PDF: failed to access Templater plugin", e);
+	}
+	return null;
+}
+
 async function createNoteFromTemplate(
 	app: App,
 	templateFile: TFile,
@@ -91,8 +121,8 @@ async function createNoteFromTemplate(
 	filename: string,
 ): Promise<TFile> {
 	// Try Templater plugin first — it handles its own placeholder resolution
-	const templater = (app as any).plugins?.plugins?.["templater-obsidian"];
-	if (templater?.templater?.create_new_note_from_template) {
+	const templater = getTemplaterPlugin(app);
+	if (templater) {
 		try {
 			const created: TFile | undefined = await templater.templater.create_new_note_from_template(
 				templateFile, folder, filename, false,
@@ -120,11 +150,43 @@ async function createNoteFromTemplate(
 	return await app.vault.create(notePath, content);
 }
 
-function resolveCoreTemplatePlaceholders(app: App, content: string, title: string): string {
-	const m = (window as any).moment;
+type MomentFn = () => { format: (fmt: string) => string };
 
-	const coreTemplates = (app as any).internalPlugins?.getPluginById?.("templates");
-	const opts = coreTemplates?.instance?.options;
+function getMoment(): MomentFn | null {
+	try {
+		const m = (window as unknown as { moment?: MomentFn }).moment;
+		return typeof m === "function" ? m : null;
+	} catch (e) {
+		console.warn("Wrap PDF: failed to access moment", e);
+		return null;
+	}
+}
+
+interface CoreTemplatesPlugin {
+	instance?: {
+		options?: {
+			dateFormat?: string;
+			timeFormat?: string;
+		};
+	};
+}
+
+function getCoreTemplatesPlugin(app: App): CoreTemplatesPlugin | null {
+	try {
+		const internalPlugins = (app as unknown as {
+			internalPlugins?: { getPluginById?: (id: string) => CoreTemplatesPlugin | undefined };
+		}).internalPlugins;
+		return internalPlugins?.getPluginById?.("templates") ?? null;
+	} catch (e) {
+		console.warn("Wrap PDF: failed to access core Templates plugin", e);
+		return null;
+	}
+}
+
+function resolveCoreTemplatePlaceholders(app: App, content: string, title: string): string {
+	const m = getMoment();
+
+	const opts = getCoreTemplatesPlugin(app)?.instance?.options;
 	const dateFormat: string = opts?.dateFormat || "YYYY-MM-DD";
 	const timeFormat: string = opts?.timeFormat || "HH:mm";
 
@@ -141,7 +203,7 @@ async function updateFrontmatter(app: App, noteFile: TFile, pdfPath: string): Pr
 	const pdfName = pdfPath.split("/").pop() ?? pdfPath;
 	const wikilink = `[[${pdfPath}|${pdfName}]]`;
 
-	await app.fileManager.processFrontMatter(noteFile, (fm: Record<string, any>) => {
+	await app.fileManager.processFrontMatter(noteFile, (fm: Record<string, unknown>) => {
 		const keys = Object.keys(fm);
 		const attachmentsKey = keys.find(k => k.toLowerCase() === "attachments");
 		const attachmentKey = keys.find(k => k.toLowerCase() === "attachment");
