@@ -1,4 +1,3 @@
-/* eslint-disable @typescript-eslint/no-explicit-any, @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call */
 import { App, normalizePath, TFile, TFolder } from "obsidian";
 import type { PdfWrapperSettings } from "./settings.ts";
 
