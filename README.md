@@ -1,4 +1,4 @@
-# Wrap PDF
+# PDF Wrapper
 
 An [Obsidian](https://obsidian.md) plugin that wraps PDF files in markdown notes using a configurable template.
 
