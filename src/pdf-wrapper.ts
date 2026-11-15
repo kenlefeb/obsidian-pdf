@@ -28,7 +28,7 @@ export async function wrapPdf(app: App, settings: PdfWrapperSettings, pdfFile: T
 	}
 
 	// 1. Move PDF to the configured attachment folder
-	const attachmentFolder = resolveAttachmentFolder(settings, originalFolder);
+	const attachmentFolder = resolveAttachmentFolder(app, originalFolder);
 	await ensureFolder(app, attachmentFolder);
 
 	const newPdfPath = attachmentFolder
@@ -60,8 +60,9 @@ export async function wrapPdf(app: App, settings: PdfWrapperSettings, pdfFile: T
  * Resolve the Obsidian "Default location for new attachments" setting
  * relative to the note's original folder.
  */
-function resolveAttachmentFolder(settings: PdfWrapperSettings, noteFolder: TFolder): string {
-	const raw = settings.attachmentsPath;
+function resolveAttachmentFolder(app: App, noteFolder: TFolder): string {
+	const rawConfig = (app.vault as unknown as { getConfig(key: string): unknown }).getConfig("attachmentFolderPath");
+	const raw = typeof rawConfig === "string" ? rawConfig : "";
 
 	// Vault root (default)
 	if (!raw || raw === "/") return "";

@@ -1,28 +1,8 @@
 import { AbstractInputSuggest, App, PluginSettingTab, Setting, TFile } from "obsidian";
+import { DEFAULT_SETTINGS } from "./core/settings-data.ts";
 import type PdfWrapperPlugin from "./main.ts";
 
-interface VaultWithConfig {
-	getConfig(key: string): unknown;
-}
-
-export class PdfWrapperSettings {
-	templatePath = "";
-	private _attachmentsPath?: string;
-
-	constructor(private app: App) {}
-
-	get attachmentsPath(): string {
-		if (this._attachmentsPath === undefined) {
-			const raw = (this.app.vault as unknown as VaultWithConfig).getConfig("attachmentFolderPath");
-			this._attachmentsPath = typeof raw === "string" ? raw : "";
-		}
-		return this._attachmentsPath;
-	}
-
-	set attachmentsPath(value: string) {
-		this._attachmentsPath = value;
-	}
-}
+export type { PdfWrapperSettings } from "./core/settings-data.ts";
 
 export class PdfWrapperSettingTab extends PluginSettingTab {
 	plugin: PdfWrapperPlugin;
@@ -49,6 +29,26 @@ export class PdfWrapperSettingTab extends PluginSettingTab {
 						await this.plugin.saveSettings();
 					});
 			});
+
+		new Setting(containerEl)
+			.setName('Marker property')
+			.setDesc('Frontmatter property that marks a note as wrapping a PDF. Changing this does not rename the property in existing notes, so they stop being recognised until you update them.')
+			.addText(text => text
+				.setPlaceholder(DEFAULT_SETTINGS.markerProperty)
+				.setValue(this.plugin.settings.markerProperty)
+				.onChange(async (value) => {
+					this.plugin.settings.markerProperty = value.trim() || DEFAULT_SETTINGS.markerProperty;
+					await this.plugin.saveSettings();
+				}));
+
+		new Setting(containerEl)
+			.setName('Hide paired PDF files in the file explorer')
+			.addToggle(toggle => toggle
+				.setValue(this.plugin.settings.hidePairedPdfs)
+				.onChange(async (value) => {
+					this.plugin.settings.hidePairedPdfs = value;
+					await this.plugin.saveSettings();
+				}));
 	}
 }
 

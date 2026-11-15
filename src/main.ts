@@ -1,5 +1,6 @@
 import { Notice, Plugin, TFile } from 'obsidian';
-import { PdfWrapperSettings, PdfWrapperSettingTab } from "./settings.ts";
+import { mergeSettings, type PdfWrapperSettings } from "./core/settings-data.ts";
+import { PdfWrapperSettingTab } from "./settings.ts";
 import { wrapPdf } from "./pdf-wrapper.ts";
 
 export default class PdfWrapperPlugin extends Plugin {
@@ -39,8 +40,7 @@ export default class PdfWrapperPlugin extends Plugin {
 	}
 
 	async loadSettings() {
-		this.settings = new PdfWrapperSettings(this.app);
-		Object.assign(this.settings, await this.loadData() as Partial<PdfWrapperSettings>);
+		this.settings = mergeSettings(await this.loadData());
 	}
 
 	async saveSettings() {

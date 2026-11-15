@@ -2,7 +2,7 @@
 	"id": "pdf-wrapper",
 	"name": "PDF Wrapper",
 	"version": "1.0.0",
-	"minAppVersion": "1.4.10",
+	"minAppVersion": "1.8.7",
 	"description": "Wraps a PDF file with a markdown note using a configurable template.",
 	"author": "Kenneth LeFebvre",
 	"authorUrl": "https://github.com/kenlefeb",
