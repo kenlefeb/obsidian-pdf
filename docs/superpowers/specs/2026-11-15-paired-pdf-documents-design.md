@@ -1,7 +1,7 @@
 # Paired PDF documents — design
 
 Date: 2026-11-15
-Status: approved by owner 2026-11-15 (revision 4: wrapping has no prerequisites)
+Status: approved by owner 2026-11-15 (revision 5: following in-app changes is a setting; spike 2 no longer gates the build)
 
 ## Intent
 
@@ -135,6 +135,22 @@ that intent.
 Extending the rule to renames and moves also removes the multi-device race:
 a device that merely *receives* a rename through sync never acts on it, so two
 devices cannot both rename the same PDF.
+
+**The owner's decision on the unproven part (revision 5).** Whether the
+plugin can reliably tell a local action from an outside one has not been
+tested in the owner's vaults. Rather than gate the build on that test, the
+owner chose to assume detection works and to give the user the switch:
+
+- "Delete the PDF when its note is deleted in Obsidian" — on by default. When
+  off, a wrapped note's PDF is never deleted by the plugin; it is kept and
+  listed, exactly as for a note removed outside Obsidian.
+- "Rename and move the PDF with its note" — on by default *(call: the owner
+  asked for the delete switch; the same detection drives renames and moves,
+  so they get the same escape hatch)*. When off, in-app renames and moves are
+  treated like outside ones: nothing follows, and the pair is listed.
+
+Each setting's description says plainly what it relies on and when to turn it
+off.
 
 This rule depends on telling a local action from everything else. See "Local
 intent" under Technical notes; it is the main thing spike 2 must confirm. If a
@@ -357,6 +373,8 @@ folder are excluded, as for automatic wrapping. *(call)*
   notes carrying the old name stop being recognised. *(call)*
 - Wrap new PDFs automatically (per device, default off).
 - Hide paired PDFs in the file explorer (default on).
+- Delete the PDF when its note is deleted in Obsidian (default on).
+- Rename and move the PDF with its note (default on).
 
 The earlier draft's "on delete: trash / leave" setting is dropped; the owner's
 delete rule makes it unnecessary.
@@ -428,11 +446,13 @@ These are throwaway and gate decisions in the plan.
 
 ## Risks
 
-- **Local intent may not be dependable.** If in-app actions cannot be reliably
-  identified, the plugin would fall back to listing everything, which defeats
-  goal 2. If sync-delivered changes are misidentified as local, deletes and
-  renames could be repeated on receiving devices. Either result from spike 2
-  must go back to the owner before building further.
+- **Local intent may not be dependable.** It is assumed to work (owner's
+  decision, revision 5) and has not been verified. If in-app actions are not
+  recognised, nothing follows and pairs are listed. If sync-delivered or
+  Finder changes are mistaken for local ones, a receiving device could repeat
+  a rename, or trash a PDF whose note arrived as delete-then-create. The two
+  settings above are the remedy, and the README must say so. Spike 2 remains
+  available as an optional diagnostic.
 - **In-app delete follows the user's Obsidian setting**, which may be
   permanent deletion. This is the owner's explicit choice.
 - **Automatic wrapping on several devices** can produce conflicting notes for
