@@ -61,12 +61,18 @@ export function pairKey(path: string): string {
 	return `${dirname(path)}/${basename(path)}`.toLowerCase();
 }
 
-/** Where a note's PDF sits: same folder, same base name. "a/B.md" -> "a/B.pdf". */
+/**
+ * The name a note's PDF is given: same folder, same base name, always a lower-case ".pdf". "a/B.md" -> "a/B.pdf".
+ * A destination name, not a lookup: an existing PDF may have its extension in another case (see findPdfBeside).
+ */
 export function pdfBeside(notePath: string): string {
 	return joinPath(dirname(notePath), `${basename(notePath)}.pdf`);
 }
 
-/** Where a PDF's note sits: same folder, same base name. "a/B.pdf" -> "a/B.md". */
+/**
+ * The name a PDF's note is given: same folder, same base name, always a lower-case ".md". "a/B.pdf" -> "a/B.md".
+ * A destination name, not a lookup: an existing note may have its extension in another case (see findNoteBeside).
+ */
 export function noteBeside(pdfPath: string): string {
 	return joinPath(dirname(pdfPath), `${basename(pdfPath)}.md`);
 }

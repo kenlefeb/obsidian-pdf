@@ -1,6 +1,6 @@
 import { expect, test } from "vitest";
 import type { MarkedNote } from "../../src/core/model.ts";
-import { healthyPairs, pairOfNote, pairUp } from "../../src/core/pairing.ts";
+import { findNoteBeside, findPdfBeside, healthyPairs, pairOfNote, pairUp } from "../../src/core/pairing.ts";
 
 const note = (notePath: string, linkedPdf: string | null = null): MarkedNote =>
 	({ notePath, markerLink: linkedPdf, linkedPdf, ownTargets: linkedPdf ? [linkedPdf] : [] });
@@ -39,4 +39,38 @@ test("a healthy pair whose marker still links to its PDF", () => {
 	const p = pairUp({ notePaths: ["A.md"], pdfPaths: ["A.pdf"], marked: [note("A.md", "A.pdf")] });
 	expect(healthyPairs(p)).toEqual([{ notePath: "A.md", pdfPath: "A.pdf" }]);
 	expect(p.unwrappedPdfs).toEqual([]);
+});
+
+test("a PDF pairs whatever the case of its extension, under its real path", () => {
+	const p = pairUp({ notePaths: ["a/S.md"], pdfPaths: ["a/S.PDF", "a/T.PDF"], marked: [note("a/S.md")] });
+	expect(p.pairs).toEqual([{ note: note("a/S.md"), pdfPath: "a/S.PDF", state: "healthy" }]);
+	expect(healthyPairs(p)).toEqual([{ notePath: "a/S.md", pdfPath: "a/S.PDF" }]);
+	expect(p.unwrappedPdfs).toEqual(["a/T.PDF"]);
+});
+
+test("pairUp picks the same PDF as findPdfBeside when two differ only in extension case", () => {
+	const pdfPaths = ["a/S.PDF", "a/S.pdf"];
+	const p = pairUp({ notePaths: ["a/S.md"], pdfPaths, marked: [note("a/S.md")] });
+	expect(pairOfNote(p, "a/S.md")?.pdfPath).toBe(findPdfBeside("a/S.md", pdfPaths));
+	expect(p.unwrappedPdfs).toEqual(["a/S.pdf"]);
+});
+
+test("findPdfBeside", () => {
+	const pdfs = ["a/S.PDF", "b/S.pdf", "T.pdf", "a/u.pdf"];
+	expect(findPdfBeside("a/S.md", pdfs)).toBe("a/S.PDF");
+	expect(findPdfBeside("b/S.md", pdfs)).toBe("b/S.pdf");
+	expect(findPdfBeside("T.MD", pdfs)).toBe("T.pdf");
+	expect(findPdfBeside("c/S.md", pdfs)).toBeNull(); // other folder
+	expect(findPdfBeside("a/U.md", pdfs)).toBeNull(); // base name differs in case
+	expect(findPdfBeside("a/S.txt", pdfs)).toBeNull(); // not a note
+	expect(findPdfBeside("a/S.md", [])).toBeNull();
+});
+
+test("findNoteBeside", () => {
+	const notes = ["a/S.md", "T.MD", "a/u.md", "a/S.pdf"];
+	expect(findNoteBeside("a/S.PDF", notes)).toBe("a/S.md");
+	expect(findNoteBeside("T.pdf", notes)).toBe("T.MD");
+	expect(findNoteBeside("b/S.pdf", notes)).toBeNull();
+	expect(findNoteBeside("a/U.pdf", notes)).toBeNull();
+	expect(findNoteBeside("a/S.md", notes)).toBeNull(); // not a PDF
 });
