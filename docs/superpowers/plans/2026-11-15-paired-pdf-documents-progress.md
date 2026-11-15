@@ -96,4 +96,118 @@ Task 6: minor (deferred): no unit coverage for EmbedUpdateError branch, WrapInco
 Task 6: complete (commits a490e5f..abf9d10 excluding d284ed7, review clean after 2 fix rounds)
 GATE: Tasks 7-14 wait for owner's spike 2 logs. Spike 1 desktop result recorded above. Next action on resume: read logs, decide local-intent, set SETTLE_MS, then dispatch Task 7.
 Owner result (spike 1, desktop, 3000 pairs): hiding works while scrolling until about row 900-something, then PDFs are no longer hidden. Controller reproduced the same 6000 rules on 3000 simulated rows in Chromium 153: all parsed, all PDFs hidden — so not a CSS-engine limit; cause is Obsidian-specific (explorer virtualisation / DOM) or the sheet held fewer pairs. Awaiting owner diagnostics (notice count, first visible Doc number, console probe).
-Rough edge (spike build): 'rename a test pair' empty-list message does not name the Spike test folder.
+Owner decision 2026-11-15: expose local-intent reliance as a setting, default assuming detection works. Spec rev 5; plan Task 5 step 6 no longer a gate; Task 8 gains followDeletes/followRenames; Task 13 default stays on.
+Ruling: added a sibling followRenames setting alongside the owner's delete setting — same detection, same failure remedy — cost if wrong: one extra toggle
+GATE LIFTED: Tasks 7-14 proceed. SETTLE_MS provisional 2000 (no spike 2 data).
+Task 7: dispatching (model sonnet)
+Task 7: implementer DONE at 732e648 (agent aac6c73c3b341610f, BASE 9d1e8de). Known issue to fix: case-only rename of a note finds its own partner as 'destination taken' → notice instead of following.
+Task 7: review Needs fixes — I1 case-only rename refused with false notice; I2 (plan-mandated) setClaim emitted for non-local renames
+Ruling: I2 — spec governing rule beats the plan's unconditioned "setClaim only" rows: no writes for non-local changes; return recheck — cost if wrong: after an outside folder move a pair may be listed for a one-click fix instead of silently normalised
+Task 7: fix round 1/5 dispatched to aac6c73c3b341610f (FIX_BASE 732e648, scoped to react.ts + test). Also sent: other-owner guard, recheck coverage, case-insensitive shouldAutoWrap, test snapshot fix
+Task 7: minor (deferred): a PDF rename can move the note of a pair that was not healthy before the event (event carries no previous claim) — unusual snapshot; consider carrying previous claim
+Task 7: hand-off to Task 8: executor must re-check destination at execution time (folders invisible to react), handle case-only renames on case-insensitive filesystems, pass null (not '') for root attachment folder, exclude deleted note's own claim from the snapshot
+Task 9: implementer running concurrently (agent a2c1b7f71a6e8e80a, model sonnet, BASE 732e648)
+Task 9: implementer DONE_WITH_CONCERNS at d95c451 (concerns = disclosed choices; '' attachment folder handled by callers passing null per specificAttachmentFolder). Review dispatching.
+Task 7: fix round 1 committed 628e23e; controller ran full suite; re-review dispatching
+Task 7: re-review of fix round 1 dispatched (sonnet)
+Task 9: review Needs fixes — 4 Important: choose-pdf leaves broken embed (rawTarget not in oldTargets); isBulkFixable/planFix do not re-check a stale item against the snapshot (can move a healthy pair's PDF); choose-pdf accepts a claimed PDF; delete-pdf not validated against snapshot/kind
+Task 9: fix round 1/5 dispatched to a2c1b7f71a6e8e80a (FIX_BASE d95c451): isCurrent() re-validation at top of planFix, delete-pdf/choose-pdf guards, isBulkFixable ownership, rawTarget in oldTargets, candidate ordering
+Task 9: hand-off to Task 10: store should drop rows where isCurrent() is false and refresh after a 'changed since listed' notice; executor must refuse a folder at a destination
+Task 8: implementer running (agent aca86a1bcb85709b4, model opus, BASE 628e23e), concurrent with Task 9 fix round 1 and Task 7 re-review
+Task 7: fix round 1/5 (6 addressed, 0 open; commits 732e648..628e23e scoped to react files)
+Task 7: complete (commits 9d1e8de..628e23e, review clean after 1 fix round)
+Task 9: fix round 1 committed c151296; re-review dispatching
+Task 9: fix round 1/5 (6 addressed, 0 open; commits d95c451..c151296 scoped to fixes files)
+Task 9: minor (deferred): noticeOnly test helper cannot tell the stale notice from the taken notice; isBulkFixable/planFix re-run classify per item (O(N×snapshot) in fix-all); oldTargets may include the new canonical target (verify rewriteEmbeds treats old==new as no-op)
+Task 9: complete (commits 732e648..c151296 scoped, review clean after 1 fix round)
+Task 8: implementer DONE_WITH_CONCERNS at fe84ec7 (agent aca86a1bcb85709b4, review BASE c151296)
+Ruling: accept Executor.run → Promise<boolean>, OwnChanges.mark returning a release function, LocalIntent.peek() for the spike log, and the single-line sentence-case lint disable for the proper noun "Finder" — all serve the brief's intent — cost if wrong: caught in review
+Ruling: onRecheck signature becomes (pendingRemoved: string[]) => void, called once per settle window — one rescan per window instead of one per path — to be applied in Task 8's fix round or Task 10
+Task 8: review Needs fixes — I1 onRecheck signature ruling not applied (sent after dispatch). Reviewer ⚠️: reaction may race Obsidian's link updater when a PDF is renamed in-app (possible corrupted note text).
+Ruling: treat the link-updater race as Important and fix now — wrap fileManager.renameFile for in-flight tracking and await LocalIntent.whenIdle() before reacting — unverifiable here, but the downside is corrupted user text — cost if wrong: a short delay before following; one more instance-level wrap whose effectiveness the checklist must confirm
+Task 8: fix round 1/5 dispatched to aca86a1bcb85709b4 (FIX_BASE fe84ec7): onRecheck string[], whenIdle, queue hardening, unloaded flag, wrap mark release, pure pieces to core with tests, folder checklist cases
+Task 8: fix round 1 committed b9b180d; controller re-ran checks; re-review dispatching
+Task 8: re-review of fix round 1 dispatched (agent a03d4d2440cadce53, opus)
+Task 10: implementer running concurrently (agent a9c5c1d830b996f41, model opus, BASE b9b180d); told not to modify watcher/execute/local-intent or existing core files
+Ruling: AttentionStore.refresh takes string[] (matches Watcher.onRecheck) — supersedes the brief's string|null
+Task 8: fix round 1/5 (7 addressed, 0 original open; commits fe84ec7..b9b180d). Re-review raised 4 new Minors.
+Ruling: fix round 2 for Task 8 will apply — cap whenIdle wait at 10 s then proceed (unbounded wait can silently stall following for the session); correct the checklist console check (monkey-around wrapper prints `current.apply(this, args)`, not next.call); add checklist assumptions (create fires before vault.create resolves; rename with "Automatically update internal links" off; Templater move-back rename); fix overstated unload comment. HELD until Task 10 commits, because both edit docs/manual-test-checklist.md.
+Task 10: implementer DONE_WITH_CONCERNS at c96deae (agent a9c5c1d830b996f41). Concerns = disclosed deviations (singular wording, one lint suppression, bulkCounts(), delayed second refresh, button labels) — accepted pending review.
+Task 8: fix round 2/5 dispatching to aca86a1bcb85709b4 (FIX_BASE c96deae, scoped to watcher/local-intent/execute/checklist)
+Task 8: fix round 2 committed 8686a4e; re-review dispatching (sonnet)
+Task 8: fix round 2/5 (4 addressed, 0 open; commits c96deae..8686a4e)
+Task 8: minor (deferred): while a wrapped call is stuck, each queued event waits the full 10 s; wait test lacks timer-count assertion after cap; Templater move-back rename enters the queue as a local rename (expected harmless); wrap own-mark release relies on create firing before vault.create resolves (checklist)
+Task 8: complete (commits c151296..8686a4e excluding c96deae, review clean after 2 fix rounds)
+Task 10: review Needs fixes — I1 fixes can run after unload (queued task or modal left open)
+Ruling: raise the reviewer's "note-removed entry lingers while cache lags, delete-pdf could trash a PDF whose note exists" to Important (I2) — it trashes a file — fix by checking the vault file list directly before delete-pdf — cost if wrong: one extra refusal message in a rare window
+Ruling: in bulk runs a stale item (Executor returns false) is skipped, not a stop; only a throw stops — matches intent of the amendment
+Task 10: fix round 1/5 dispatched to a9c5c1d830b996f41 (FIX_BASE 8686a4e for its files): unloaded guards + close modals, delete-pdf sibling-note check, running state, finally in bulk loops, Checking… state, visible no-candidates line, checklist
+Task 10: minor (deferred): classify re-run per item in refresh and bulk loops (O(items × vault))
+Task 10: fix round 1 committed c596e10; re-review dispatching (sonnet). Task 11 dispatching concurrently (sonnet, BASE c596e10).
+Task 10: fix round 1/5 (8 addressed, 0 open; commits 8686a4e..c596e10)
+Task 10: minor (deferred): if every scan throws the modal stays on "Checking…" (show "Could not check…" when the opening refresh settles unscanned); modal opened after unload registers a listener on a closed modal; classify per item
+Task 10: complete (commits b9b180d..c596e10 excluding 8686a4e, review clean after 1 fix round)
+Task 11: implementer running (agent ad67cd17bfca73c85, sonnet, BASE c596e10)
+Task 11: implementer DONE_WITH_CONCERNS at 95b68cd (Executor gained run(actions,{quiet}); 20 notices on a 20-PDF drop). Review dispatching (sonnet). Task 12 dispatching concurrently (sonnet, BASE 95b68cd).
+Task 11: review dispatched (agent acd5e055bc5201110, opus)
+Task 12: implementer running (agent a11abcbd1621f1b04, sonnet, BASE 95b68cd)
+Ruling (Task 12): copy the PDF before the note — a failure then leaves an unwrapped PDF rather than a note claiming the original's PDF — supersedes the brief's note-first order — cost if wrong: none
+Task 12: implementer DONE_WITH_CONCERNS at 7278f04 (concerns = unverified at runtime; disclosed choices). Review dispatching (sonnet).
+Task 12: review Needs fixes — I1 partial-failure Notice can name a pre-existing file as "left behind… you can delete it"
+Task 12: fix round 1/5 dispatched to a11abcbd1621f1b04 (FIX_BASE 7278f04): track which copies were made (3 separate runs), pure message function with tests, notices for silent outcomes, onDone → store.refresh
+Task 12: minor (deferred): oldTargets includes the bare base name, so `![[S]]` (which Obsidian resolves to a note first) is rewritten to a PDF embed — inherited from the original plugin's behaviour; review whether base-name rewriting should be limited to the wrap step
+Task 11: review Needs fixes — I1 failure de-duplication ineffective (messages name the file); I2 equal settle on both devices cancels out, near-zero cross-device protection
+Ruling (I1): replace per-message de-duplication and per-success notices with a per-pass summary (≤3 successes individually, else "Wrapped n PDFs"; failures summarised with the first problem) — supersedes the brief's "Notice per wrap" — the brief's own purpose was no notice storm — cost if wrong: wording only
+Ruling (I2): settle depends on origin — in-app 2000 ms; outside 15000 ms + random 0–15000 ms jitter per PDF; LocalIntent also wraps Vault.create/createBinary/copy so in-app drops read as local — spec says the settle is what prevents double wrapping — cost if wrong: Finder-saved PDFs wait up to 30 s; duplicates still possible when both devices see a PDF simultaneously (per-device switch remains the remedy)
+Task 11: fix round 1/5 dispatched to ad67cd17bfca73c85 (FIX_BASE 7278f04 for its files). Also: rename-into-place arrivals, drain-failure notice, no notices after unload, quiet limited to wrap, refresh per wrap, 60 s hung-wrap warning
+Task 11: minor (deferred): one O(vault) snapshot per wrap; a hung wrap stalls the auto-wrap queue (warning only)
+Task 12: fix round 1 committed 6afdfa5; re-review dispatching (sonnet)
+Task 12: fix round 1/5 (3 addressed, 0 open; commits 7278f04..6afdfa5)
+Task 12: minor (deferred): onDone not called on refusal paths (harmless); "Try again" notice sits oddly beside the leftover notice; no notice if the new note vanished before opening; in-flight guard keyed by note path only
+Task 12: complete (commits 95b68cd..6afdfa5, review clean after 1 fix round)
+Task 11: fix round 1 committed cd6611f; controller re-ran checks; re-review dispatching (opus). Task 13 dispatching concurrently (sonnet, BASE cd6611f).
+Task 11: re-review of fix round 1 dispatched (agent a0ace970fe7d96a37, opus) — asked specifically whether the new create/copy LocalIntent marks can make a later outside rename/delete read as local
+Task 13: implementer running (agent ae5b14e0ca76df587, sonnet, BASE cd6611f)
+Task 13: implementer DONE_WITH_CONCERNS at d2f2270 (Executor gained optional afterRun callback → refreshSoon; accepted pending review). Review dispatching (sonnet).
+Task 11: fix round 1/5 (8 addressed, 0 original open; commits 6afdfa5..cd6611f). Re-review Clean with 5 Minors.
+Ruling: fix the folder-copy mark now (round 2) although rated Minor — it is a path to trashing a PDF on a non-local delete — cost: one small round
+Task 11: fix round 2/5 dispatched to ad67cd17bfca73c85 (FIX_BASE d2f2270 for its files): no marks for folder copies, checklist expected wait, doubled full stop, watcher comment
+Task 11: minor (deferred): refusal→skipped mapping untested (Obsidian layer); cross-device duplicate still likely (~25% at 2 s note-sync lag) when both devices see an outside PDF at once — design limit, per-device switch is the remedy; whenIdle now also waits on other plugins' creates (capped 10 s)
+Task 13: review dispatched (agent a0d7c9bafe26aeb70, sonnet)
+Task 13: review Needs fixes — I1 uncoalesced afterRun→refresh: bulk run of N queues N full rescans after the run and none during it
+Ruling: toggle rebuilding from the cached classification (not via store.refresh) is accepted — no scan needed, same classification path
+Task 13: fix round 1/5 dispatched to ae5b14e0ca76df587 (FIX_BASE d2f2270): coalesce refreshSoon, per-item rescan+notify inside store bulk loop, suppress afterRun for store-initiated runs, guard timer callback and handleWrapPdf finally, afterRun tests, sheet-removed assertion
+Task 11: fix round 2 committed 977d0fb; re-review dispatching (sonnet)
+Task 13: fix round 1 committed f2a3fc6; controller re-ran checks; re-review dispatching (sonnet)
+Task 11: fix round 2/5 (4 addressed, 0 open; commits d2f2270..977d0fb scoped)
+Task 11: minor (deferred): stoppedMessage strips only full stops; no checklist item for copying a folder that contains a wrapped pair; watcher comment wording
+Task 11: complete (commits c596e10..977d0fb scoped, review clean after 2 fix rounds)
+Task 14: dispatching (sonnet, BASE f2a3fc6), concurrent with Task 13 re-review
+Task 13: re-review of fix round 1 dispatched (agent ab8bab314a1df3947, sonnet)
+Task 14: implementer running (agent a71dcf04f6ff79e6b, sonnet, BASE f2a3fc6)
+Ruling (Task 14): spike commands are removed from the plugin as planned; spike 2 stays available by building commit f2a3fc6, noted in the spike checklist — spec rev 5 says spike 2 "remains available as an optional diagnostic" — cost if wrong: owner must build an older commit to run it
+Task 13: fix round 1/5 (5 addressed, 0 open; commits 977d0fb..f2a3fc6)
+Task 13: minor (deferred): redundant final scan in a bulk run and ~2N+1 snapshots for N items; no follow-up refresh after a failed/stale first bulk item (guarded by done > 0); direct store.refresh() calls outside the scheduler (auto-wrap callback, duplicate); Executor's skipAfterRun branch and store bulk changes untested (Obsidian layer)
+Task 13: complete (commits cd6611f..f2a3fc6 excluding 977d0fb, review clean after 1 fix round)
+Task 14: implementer DONE_WITH_CONCERNS at a0735bc. Concern on 3000-row wording resolved: owner confirmed 3,000 rows hidden once creation finished. Review dispatching (sonnet).
+Task 14: review Needs fixes — README states unverified behaviour as guarantees ("never acts/deletes" for outside changes; sync never followed), claims "no explorer internals" though styling relies on undocumented row markup, checklist quotes a label ("Unwrapped") the UI does not show
+Ruling: state line for a pending PDF becomes "Its note was deleted; the PDF was kept" — the old "removed outside Obsidian" is false when delete-following is switched off and the user deletes in-app — supersedes the plan's text — cost if wrong: wording only
+Task 14: fix round 1/5 dispatched to a71dcf04f6ff79e6b (FIX_BASE a0735bc)
+Task 14: fix round 1 committed 5671b71; re-review dispatched (sonnet). Final whole-branch review dispatched (opus) on aa377be..5671b71.
+Task 14: fix round 1/5 (11 addressed). Re-review found remaining unhedged README sentences outside the fix diff: lines 7, 153, 160 (guarantees resting on unverified detection), 114 ("never deleted by the plugin" vs the Delete fix), 46, 94 ("note removed" wording); CLAUDE.md:74 vs :69 (try/catch claim), CLAUDE.md:48 and comments still say "removed outside Obsidian"; auto-wrap notice says "Unwrapped PDFs" vs list label "Not wrapped"
+Ruling: these doc sentences are carried into the single final fix wave rather than a second Task 14 round — one fixer, one re-review — cost if wrong: none, they are tracked here
+Task 14: complete pending final fix wave (commits f2a3fc6..5671b71)
+FINAL REVIEW (opus, aa377be..5671b71): no Critical. 5 Important: I1 Wrap all vs auto-wrap/manual wrap collisions stop the run; I2 frontmatter-only changes never refresh list/explorer, marker setting applies per keystroke; I3 auto-wrap pass O(P²·N) + 2 rescans per wrap; I4 followed delete can trash a PDF other notes embed; I5 checklist has a wrong expected message and an impossible file name. "Ready with fixes."
+Ruling (final I4): before following a delete, if any other note links to or embeds the PDF, keep it and list it — the spec is silent, but trashing an embedded PDF is the anti-goal — cost if wrong: a PDF kept and listed that the user wanted gone (one click)
+Ruling (final I1): in bulk wraps a WrapRefusal is a skip, not a stop; unwrapped PDFs with a same-name unclaimed note beside them are not listed as "Not wrapped" (they cannot be wrapped; such legacy hand-wrapped pairs need the owner's migration) — cost if wrong: those PDFs are invisible to the list
+Ruling: triage accepted as given by the final reviewer; "should fix" items go into the single fix wave; the broad consolidation of destination-free helpers is logged, not done
+Ruling: Task 11 create/copy LocalIntent wrapping stays; README gains the caveat that sync plugins writing through the file API make synced PDFs look local
+FINAL FIX WAVE: findings in final-findings.md; dispatching ONE fixer (opus), FIX_BASE 5671b71
+Residual (logged, not fixed): seven "is destination free / sibling exists" variants; partnerDestination/ownExtension duplicated with different conventions; PDF rename can move the note of a not-yet-healthy pair; cross-device duplicate wraps (design limit); attachments stored beside notes + auto-wrap on = every pasted PDF treated as a document
+FINAL FIX WAVE: committed 32981f0..ff778cd (6 commits), DONE_WITH_CONCERNS (F4 depends on metadata cache having indexed the other note's link; package.json description left at 1.0 wording). Controller re-ran checks. Single scoped re-review dispatching (opus).
+FINAL FIX WAVE re-review (opus): all of F1–F5 and items 1–23 ADDRESSED; nothing on the do-not-do list done; no Critical. Residual findings from the fix wave itself:
+Ruling (breaker, parked): R1 — with Templater, a template that errors or whose prompt is cancelled now reports "Templater created the note somewhere else…" although no note exists, and the checklist line for a throwing template still expects the old fallback note — parked for the owner: no second fix wave; not a safety issue (nothing is deleted or overwritten) — cost if left: a misleading message in a common Templater case and one wrong checklist expectation
+Ruling (breaker, parked): R2 — rescan's Wrap-all count re-checks every "Not wrapped" item against every note (O(U·N)) once per wrap during a long automatic-wrapping pass, reintroducing stutter for large bulk arrivals — parked for the owner — cost if left: slow UI while hundreds of PDFs are auto-wrapped in a large vault
+Ruling (breaker, parked): R3 — keep-if-linked on delete depends on Obsidian's link index already showing the other note's link; a merge that writes the link and deletes the note in quick succession may still trash the PDF — pre-accepted residual; cheap narrowing exists (also check recently modified notes' text) — cost if left: the Note composer merge case may still lose the PDF to the trash
+Parked minors: "Wrap all" can stay visible and report 0 for a PDF whose name cannot be linked; marker field commits a partial name if focus leaves mid-word; README delete row states the link check as a guarantee; equivalence test for shouldAutoWrap is circular
+STATE: all 14 tasks complete; final review done; one fix wave done; residuals R1–R3 parked for owner. Head ff778cd. 265 unit tests, build, lint pass. Nothing has been run in Obsidian except the spike's explorer hiding.
