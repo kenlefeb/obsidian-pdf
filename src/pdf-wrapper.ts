@@ -1,88 +1,168 @@
-import { App, normalizePath, TFile, TFolder } from "obsidian";
-import type { PdfWrapperSettings } from "./settings.ts";
+import { App, normalizePath, Notice, TFile, TFolder, type TAbstractFile } from "obsidian";
+import { isLinkSafeName } from "./core/claims.ts";
+import { dirname, isNote, joinPath } from "./core/paths.ts";
+import type { PdfWrapperSettings } from "./core/settings-data.ts";
+import {
+	defaultTemplate,
+	defaultTemplatePath,
+	ensureTemplateComponents,
+	templatePathWithExtension,
+} from "./core/template.ts";
+import { writeClaim } from "./obsidian/snapshot.ts";
 
-export async function wrapPdf(app: App, settings: PdfWrapperSettings, pdfFile: TFile): Promise<void> {
-	const originalFolder = pdfFile.parent;
-	if (!originalFolder) throw new Error("Cannot determine the PDF's parent folder");
-
-	const pdfBasename = pdfFile.basename;
-	const pdfName = pdfFile.name;
-
-	// Bail out if a wrapper note already exists
-	const notePath = normalizePath(
-		originalFolder.isRoot()
-			? `${pdfBasename}.md`
-			: `${originalFolder.path}/${pdfBasename}.md`
-	);
-	if (app.vault.getAbstractFileByPath(notePath)) {
-		throw new Error(`A note already exists at ${notePath}`);
-	}
-
-	// Resolve and validate template (stored without .md extension)
-	const templatePath = settings.templatePath.endsWith(".md")
-		? settings.templatePath
-		: `${settings.templatePath}.md`;
-	const templateFile = app.vault.getAbstractFileByPath(templatePath) as TFile | null;
-	if (!(templateFile instanceof TFile)) {
-		throw new Error(`Template not found: ${templatePath}`);
-	}
-
-	// 1. Move PDF to the configured attachment folder
-	const attachmentFolder = resolveAttachmentFolder(app, originalFolder);
-	await ensureFolder(app, attachmentFolder);
-
-	const newPdfPath = attachmentFolder
-		? normalizePath(`${attachmentFolder}/${pdfName}`)
-		: pdfName;
-
-	if (newPdfPath !== pdfFile.path) {
-		if (app.vault.getAbstractFileByPath(newPdfPath)) {
-			throw new Error(`A file already exists at ${newPdfPath}`);
-		}
-		await app.fileManager.renameFile(pdfFile, newPdfPath);
-	}
-	// After renameFile, pdfFile.path is now newPdfPath
-
-	// 2. Create wrapper note from template
-	const noteFile = await createNoteFromTemplate(app, templateFile, originalFolder, pdfBasename);
-
-	// 3. Update frontmatter attachment property
-	await updateFrontmatter(app, noteFile, pdfFile.path);
-
-	// 4. Fix embed links to point to the moved PDF
-	await updateEmbedLinks(noteFile, app, pdfBasename, pdfFile.path);
-
-	// 5. Open the new note
-	await app.workspace.getLeaf().openFile(noteFile);
+/** Where the note wrapping `pdf` lives: beside it, with the same base name. */
+export function siblingNotePath(pdf: TFile): string {
+	return joinPath(dirname(pdf.path), `${pdf.basename}.md`);
 }
 
 /**
- * Resolve the Obsidian "Default location for new attachments" setting
- * relative to the note's original folder.
+ * Creates `<name>.md` beside the PDF from the template and marks it with the claim.
+ * The PDF is not moved. Throws an Error with a user-facing message on any failure.
  */
-function resolveAttachmentFolder(app: App, noteFolder: TFolder): string {
-	const rawConfig = (app.vault as unknown as { getConfig(key: string): unknown }).getConfig("attachmentFolderPath");
-	const raw = typeof rawConfig === "string" ? rawConfig : "";
-
-	// Vault root (default)
-	if (!raw || raw === "/") return "";
-
-	// Relative to current file: "./" or "./subfolder"
-	if (raw.startsWith("./")) {
-		const relative = raw.slice(2);
-		const parent = noteFolder.isRoot() ? "" : noteFolder.path;
-		if (!relative) return parent;
-		return parent ? `${parent}/${relative}` : relative;
+export async function wrapPdf(
+	app: App,
+	settings: PdfWrapperSettings,
+	saveSettings: () => Promise<void>,
+	pdfFile: TFile,
+	options: { open: boolean },
+): Promise<TFile> {
+	if (!isLinkSafeName(pdfFile.path)) {
+		throw new Error(`Cannot wrap ${pdfFile.name}: file names containing [ ] | # ^ cannot be linked. Rename the PDF first.`);
 	}
 
-	// Absolute vault path
-	return raw;
+	const folder = pdfFile.parent;
+	if (!folder) throw new Error(`Cannot determine the folder of ${pdfFile.path}.`);
+
+	const notePath = siblingNotePath(pdfFile);
+	if (app.vault.getAbstractFileByPath(notePath)) {
+		throw new Error(`A note already exists at ${notePath}.`);
+	}
+
+	const templateFile = await prepareTemplate(app, settings, saveSettings);
+
+	const note = await createNoteFromTemplate(app, templateFile, folder, pdfFile.basename);
+	if (note.path !== notePath) {
+		// A template that renames or moves the note it creates: put it back beside the PDF.
+		await app.fileManager.renameFile(note, notePath);
+	}
+
+	await writeClaim(app, note, settings.markerProperty, pdfFile.path, [pdfFile.name, pdfFile.basename]);
+
+	if (options.open) {
+		await app.workspace.getLeaf().openFile(note);
+	}
+	return note;
 }
 
-async function ensureFolder(app: App, path: string): Promise<void> {
-	if (!path) return;
-	if (app.vault.getAbstractFileByPath(path)) return;
-	await app.vault.createFolder(path);
+/**
+ * Returns the template file, creating the default when none is configured or the configured file is
+ * missing, and adding the marker property or PDF embed when the template lacks them.
+ * Throws an Error whose message names the path and the reason.
+ */
+export async function prepareTemplate(
+	app: App,
+	settings: PdfWrapperSettings,
+	saveSettings: () => Promise<void>,
+): Promise<TFile> {
+	let path: string;
+	let file: TFile;
+
+	if (settings.templatePath.trim() === "") {
+		path = normalizePath(defaultTemplatePath({
+			templater: getTemplaterFolder(app),
+			coreTemplates: getCoreTemplatesFolder(app),
+		}));
+		const existing = app.vault.getAbstractFileByPath(path);
+		file = existing
+			? asTemplateFile(existing, path)
+			: await createDefaultTemplate(app, path, settings.markerProperty);
+		// The settings tab stores the path without ".md".
+		settings.templatePath = path.replace(/\.md$/i, "");
+		await saveSettings();
+		if (!existing) new Notice(`Created a default template at ${path}.`);
+	} else {
+		path = normalizePath(templatePathWithExtension(settings.templatePath));
+		const existing = app.vault.getAbstractFileByPath(path);
+		if (existing) {
+			file = asTemplateFile(existing, path);
+		} else {
+			file = await createDefaultTemplate(app, path, settings.markerProperty);
+			new Notice(`The template ${path} was missing, so a default was created there.`);
+		}
+	}
+
+	let added: ("marker" | "embed")[];
+	try {
+		const check = ensureTemplateComponents(await app.vault.read(file), settings.markerProperty);
+		added = check.added;
+		if (added.length > 0) await app.vault.modify(file, check.text);
+	} catch (e) {
+		throw new Error(`Could not update the template ${path}: ${reason(e)}.`);
+	}
+	if (added.length > 0) {
+		const parts = added.map((part) =>
+			part === "marker" ? `the marker property \`${settings.markerProperty}\`` : "a PDF embed");
+		new Notice(`Updated the template ${path}: added ${parts.join(" and ")}.`);
+	}
+
+	return file;
+}
+
+function asTemplateFile(file: TAbstractFile, path: string): TFile {
+	if (file instanceof TFolder) throw new Error(`${path} is a folder, not a template file.`);
+	if (!(file instanceof TFile) || !isNote(file.path)) throw new Error(`${path} is not a markdown file.`);
+	return file;
+}
+
+async function createDefaultTemplate(app: App, path: string, markerProperty: string): Promise<TFile> {
+	try {
+		await ensureParentFolders(app, path);
+		return await app.vault.create(path, defaultTemplate(markerProperty));
+	} catch (e) {
+		throw new Error(`Could not create the default template at ${path}: ${reason(e)}.`);
+	}
+}
+
+async function ensureParentFolders(app: App, path: string): Promise<void> {
+	let folder = "";
+	for (const part of dirname(path).split("/").filter((p) => p !== "")) {
+		folder = joinPath(folder, part);
+		const existing = app.vault.getAbstractFileByPath(folder);
+		if (existing instanceof TFolder) continue;
+		if (existing) throw new Error(`${folder} is a file, not a folder`);
+		await app.vault.createFolder(folder);
+	}
+}
+
+function reason(e: unknown): string {
+	return (e instanceof Error ? e.message : String(e)).replace(/\.\s*$/, "");
+}
+
+/** Templater's template folder setting, or null when Templater is absent or the value is unusable. */
+function getTemplaterFolder(app: App): string | null {
+	try {
+		const plugins = (app as unknown as { plugins?: { plugins?: Record<string, unknown> } }).plugins?.plugins;
+		const plugin = plugins?.["templater-obsidian"] as { settings?: { templates_folder?: unknown } } | undefined;
+		if (!plugin) return null;
+		const folder = plugin.settings?.templates_folder;
+		if (typeof folder === "string") return folder;
+		if (folder !== undefined) console.warn("PDF Wrapper: unexpected Templater templates_folder setting", folder);
+	} catch (e) {
+		console.warn("PDF Wrapper: failed to read Templater's template folder", e);
+	}
+	return null;
+}
+
+/** The core Templates plugin's folder setting, or null when it is absent or the value is unusable. */
+function getCoreTemplatesFolder(app: App): string | null {
+	try {
+		const folder = getCoreTemplatesPlugin(app)?.instance?.options?.folder;
+		if (typeof folder === "string") return folder;
+		if (folder !== undefined) console.warn("PDF Wrapper: unexpected core Templates folder setting", folder);
+	} catch (e) {
+		console.warn("PDF Wrapper: failed to read the core Templates folder", e);
+	}
+	return null;
 }
 
 interface TemplaterPlugin {
@@ -168,6 +248,7 @@ interface CoreTemplatesPlugin {
 		options?: {
 			dateFormat?: string;
 			timeFormat?: string;
+			folder?: unknown;
 		};
 	};
 }
@@ -198,50 +279,4 @@ function resolveCoreTemplatePlaceholders(app: App, content: string, title: strin
 		.replace(/\{\{title\}\}/g, title)
 		.replace(/\{\{date\}\}/g, date)
 		.replace(/\{\{time\}\}/g, time);
-}
-
-async function updateFrontmatter(app: App, noteFile: TFile, pdfPath: string): Promise<void> {
-	const pdfName = pdfPath.split("/").pop() ?? pdfPath;
-	const wikilink = `[[${pdfPath}|${pdfName}]]`;
-
-	await app.fileManager.processFrontMatter(noteFile, (fm: Record<string, unknown>) => {
-		const keys = Object.keys(fm);
-		const attachmentsKey = keys.find(k => k.toLowerCase() === "attachments");
-		const attachmentKey = keys.find(k => k.toLowerCase() === "attachment");
-
-		if (attachmentsKey) {
-			if (!Array.isArray(fm[attachmentsKey])) {
-				fm[attachmentsKey] = fm[attachmentsKey] ? [fm[attachmentsKey]] : [];
-			}
-			(fm[attachmentsKey] as string[]).push(wikilink);
-		} else if (attachmentKey) {
-			fm[attachmentKey] = wikilink;
-		}
-	});
-}
-
-async function updateEmbedLinks(
-	noteFile: TFile,
-	app: App,
-	pdfBasename: string,
-	pdfPath: string,
-): Promise<void> {
-	let content = await app.vault.read(noteFile);
-	const escaped = pdfBasename.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-	const linkTarget = pdfPath.replace(/\.pdf$/i, "") + ".pdf";
-
-	// Replace ![[basename.pdf]] or ![[basename]] with full path
-	const namePattern = new RegExp(`!\\[\\[${escaped}(\\.pdf)?\\]\\]`, "g");
-
-	// Replace unresolved template placeholders like ![[{{file}}.pdf]] or ![[{{title}}]]
-	const placeholderPattern = /!\[\[\{\{(?:file|title)\}\}(?:\.pdf)?\]\]/gi;
-
-	const replacement = `![[${linkTarget}]]`;
-	const updated = content
-		.replace(namePattern, replacement)
-		.replace(placeholderPattern, replacement);
-
-	if (updated !== content) {
-		await app.vault.modify(noteFile, updated);
-	}
 }
