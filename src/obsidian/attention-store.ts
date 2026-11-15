@@ -2,7 +2,7 @@ import { Notice, type App } from "obsidian";
 import type PdfWrapperPlugin from "../main.ts";
 import { bulkResultMessage, nextPendingRemoved, noteBesidePdf, noteBesidePdfMessage } from "../core/attention.ts";
 import { classify } from "../core/classify.ts";
-import { buildAttention, fixesFor, isBulkFixable, isBulkWrappable, planFix } from "../core/fixes.ts";
+import { buildAttention, bulkWrapChecker, fixesFor, isBulkFixable, isBulkWrappable, planFix } from "../core/fixes.ts";
 import { specificAttachmentFolder } from "../core/settings-data.ts";
 import type { AttentionItem, Classification, FixId, NoteClaim, Snapshot } from "../core/types.ts";
 import { WrapIncomplete, WrapMessage, WrapRefusal } from "../pdf-wrapper.ts";
@@ -249,8 +249,9 @@ export class AttentionStore {
 			this.scanned = true;
 			this.bulk = {
 				fix: this.list.filter((item) => isBulkFixable(item, snapshot, c)).length,
-				// The same test "Wrap all" applies to each entry, so the button's presence matches what it would attempt.
-				wrap: this.list.filter((item) => isBulkWrappable(item, snapshot, c)).length,
+				// The same test "Wrap all" applies to each entry, so the button's presence matches what it would attempt;
+				// indexed once for this snapshot rather than scanning every note for every entry.
+				wrap: this.list.filter(bulkWrapChecker(snapshot, c)).length,
 			};
 		} catch (error) {
 			console.error("PDF Wrapper: could not check wrapped documents", error);

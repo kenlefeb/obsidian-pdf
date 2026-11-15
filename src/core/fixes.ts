@@ -1,4 +1,5 @@
 import { noteBesidePdf } from "./attention.ts";
+import { isLinkSafeName } from "./claims.ts";
 import { classify } from "./classify.ts";
 import { basename, dirname, filename, isInFolder, isNote, joinPath, pairKey } from "./paths.ts";
 import type { Action, AttentionItem, AttentionKind, Classification, FixId, Snapshot } from "./types.ts";
@@ -195,10 +196,27 @@ export function isBulkFixable(item: AttentionItem, snapshot: Snapshot, precomput
 }
 
 /**
- * True when "Wrap all" would try this entry: an unwrapped PDF that is still unclaimed and has no same-name note beside
- * it in the snapshot's note list (the vault's file list, which does not lag as the metadata cache can).
+ * True when "Wrap all" would try this entry: an unwrapped PDF that is still unclaimed, whose name can be linked, and
+ * that has no same-name note beside it in the snapshot's note list (the vault's file list, which does not lag as the
+ * metadata cache can). A PDF whose name cannot be linked is left to its own Wrap button, which explains why.
  */
 export function isBulkWrappable(item: AttentionItem, snapshot: Snapshot, c?: Classification): boolean {
 	if (item.kind !== "unwrapped" || item.pdfPath === null) return false;
-	return noteBesidePdf(item.pdfPath, snapshot.notePaths) === null && isCurrent(item, snapshot, c);
+	return isLinkSafeName(item.pdfPath)
+		&& noteBesidePdf(item.pdfPath, snapshot.notePaths) === null
+		&& isCurrent(item, snapshot, c);
+}
+
+/**
+ * `isBulkWrappable` for every entry of one snapshot: indexes the snapshot once (the unclaimed PDFs, and the lower-cased
+ * folder and base name of every note), so each check takes constant time. For counting the entries of a whole list.
+ */
+export function bulkWrapChecker(snapshot: Snapshot, precomputed?: Classification): (item: AttentionItem) => boolean {
+	const unwrapped = new Set((precomputed ?? classify(snapshot)).unwrappedPdfs);
+	const noteKeys = new Set(snapshot.notePaths.filter(isNote).map(pairKey));
+	return (item) => item.kind === "unwrapped"
+		&& item.pdfPath !== null
+		&& isLinkSafeName(item.pdfPath)
+		&& !noteKeys.has(pairKey(item.pdfPath))
+		&& unwrapped.has(item.pdfPath);
 }

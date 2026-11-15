@@ -1,5 +1,5 @@
 import { expect, test } from 'vitest';
-import { buildAttention, candidatesForMissing, fixesFor, isBulkFixable, isBulkWrappable, isCurrent, planFix } from '../../src/core/fixes.ts';
+import { buildAttention, bulkWrapChecker, candidatesForMissing, fixesFor, isBulkFixable, isBulkWrappable, isCurrent, planFix } from '../../src/core/fixes.ts';
 import { classify } from '../../src/core/classify.ts';
 import type { Action, AttentionItem, AttentionKind, NoteClaim, Snapshot } from '../../src/core/types.ts';
 
@@ -86,6 +86,40 @@ test('isBulkWrappable is false for a claimed PDF, a gone PDF and other kinds', (
 	expect(isBulkWrappable(item('unwrapped', null, 'a/S.pdf', null), claimed)).toBe(false);
 	expect(isBulkWrappable(item('unwrapped', null, 'a/S.pdf', null), snap([], [], []))).toBe(false);
 	expect(isBulkWrappable(item('note-removed', null, 'a/S.pdf', null), snap([], ['a/S.pdf'], []))).toBe(false);
+});
+
+test('isBulkWrappable is false for a PDF whose name cannot be linked', () => {
+	for (const name of ['a/S [1].pdf', 'a/S|x.pdf', 'a/S#1.pdf', 'a/S^1.pdf']) {
+		expect([name, isBulkWrappable(item('unwrapped', null, name, null), snap([], [name], []))]).toEqual([name, false]);
+	}
+});
+
+// bulkWrapChecker: the same test for every entry of one snapshot, indexed once
+test('bulkWrapChecker and isBulkWrappable give the expected answer for each entry of one snapshot', () => {
+	const s = snap(['a/s.MD', 'b/T.md', 'c/U.txt', 'X.md'],
+		['a/S.pdf', 'a/T.pdf', 'b/V.pdf', 'c/U.pdf', 'd/W [1].pdf', 'X.pdf', 'e/Y.pdf'],
+		[c('X.md', 'e/Y.pdf')]);
+	const cases: [AttentionItem, boolean][] = [
+		[item('unwrapped', null, 'a/S.pdf', null), false],    // note beside it, other letter case
+		[item('unwrapped', null, 'a/T.pdf', null), true],     // the note of that name is in another folder
+		[item('unwrapped', null, 'b/V.pdf', null), true],
+		[item('unwrapped', null, 'c/U.pdf', null), true],     // a .txt of that name is not a note
+		[item('unwrapped', null, 'd/W [1].pdf', null), false], // name cannot be linked
+		[item('unwrapped', null, 'X.pdf', null), false],      // X.md is beside it, at the vault root
+		[item('unwrapped', null, 'e/Y.pdf', null), false],    // claimed
+		[item('unwrapped', null, 'gone.pdf', null), false],   // not in the vault
+		[item('note-removed', null, 'b/V.pdf', null), false], // other kinds
+		[item('unwrapped', null, null, null), false],
+	];
+	const check = bulkWrapChecker(s, classify(s));
+	for (const [entry, expected] of cases) {
+		expect([entry.pdfPath, entry.kind, check(entry)]).toEqual([entry.pdfPath, entry.kind, expected]);
+		expect([entry.pdfPath, entry.kind, isBulkWrappable(entry, s)]).toEqual([entry.pdfPath, entry.kind, expected]);
+	}
+});
+test('bulkWrapChecker works without a precomputed classification', () => {
+	const s = snap([], ['a/S.pdf'], []);
+	expect(bulkWrapChecker(s)(item('unwrapped', null, 'a/S.pdf', null))).toBe(true);
 });
 
 // planFix: missing
