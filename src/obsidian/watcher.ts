@@ -3,7 +3,7 @@ import { claimChanged, parseClaim } from "../core/claims.ts";
 import { isNote, isPdf } from "../core/paths.ts";
 import { react } from "../core/react.ts";
 import type { PdfWrapperSettings } from "../core/settings-data.ts";
-import type { OwnChanges } from "../core/marks.ts";
+import { PendingCreates, type OwnChanges } from "../core/marks.ts";
 import { withoutPath } from "../core/snapshot.ts";
 import { waitAtMost, type CappedWait } from "../core/wait.ts";
 import type { NoteClaim, VaultEvent } from "../core/types.ts";
@@ -47,13 +47,15 @@ export interface WatcherDeps {
 const reason = (error: unknown): string => (error instanceof Error ? error.message : String(error));
 
 /**
- * Follows renames, moves and deletes made inside Obsidian across a pair, by passing each vault event to
+ * Follows renames, moves, deletes and copies made inside Obsidian across a pair, by passing each vault event to
  * `react` and running exactly the actions it returns. Events are handled one at a time, in arrival order.
  */
 export class Watcher {
 	private queue: Promise<void> = Promise.resolve();
 	private recheckTimer: number | null = null;
 	private readonly pendingRemoved = new Set<string>();
+	/** Notes created inside Obsidian whose claim may not be indexed yet (see `onMetadataChanged`). */
+	private readonly pendingCreates = new PendingCreates();
 	/**
 	 * Set when the plugin unloads: no new event is handled and no recheck is scheduled after that. An Executor run
 	 * already in progress finishes its remaining actions, because finishing a half-done pair move (partner renamed,
@@ -65,6 +67,7 @@ export class Watcher {
 	constructor(private readonly plugin: Plugin, private readonly deps: WatcherDeps) {
 		plugin.register(() => {
 			this.unloaded = true;
+			this.pendingCreates.clear();
 			this.idleWait?.cancel();
 			this.cancelRecheck();
 		});
@@ -88,9 +91,16 @@ export class Watcher {
 	 * A note's frontmatter changed without a rename, create or delete: for example its marker property was deleted in
 	 * the properties panel, or sync delivered a changed claim. Read-only: when the claim differs from the listed one it
 	 * only asks for a refresh, so ordinary typing in a note costs one cache lookup.
+	 *
+	 * The one exception: a note created inside Obsidian moments ago (in `pendingCreates`) is passed to `react` again
+	 * as that `create`, because its claim was usually not indexed yet when the `create` event was handled. This is
+	 * allowed because it continues a local in-app create (an in-app copy of a wrapped note copies its PDF); it is
+	 * never triggered by an edit, sync or any other change.
 	 */
 	private onMetadataChanged(file: TFile): void {
-		if (this.unloaded || !isNote(file.path) || !this.deps.isListReady()) return;
+		if (this.unloaded) return;
+		if (this.pendingCreates.has(file.path)) this.continueLocalCreate(file.path);
+		if (!isNote(file.path) || !this.deps.isListReady()) return;
 		try {
 			const current = readClaim(this.plugin.app, file, this.deps.getSettings().markerProperty);
 			if (claimChanged(this.deps.listedClaim(file.path), current)) this.deps.refreshSoon();
@@ -115,7 +125,17 @@ export class Watcher {
 		if (!(file instanceof TFile) || this.isOwn(file.path)) return;
 		const local = this.deps.localIntent.consume(file.path);
 		if (isPdf(file.path)) this.deps.onPdfCreated(file.path, local);
+		if (local && isNote(file.path)) this.pendingCreates.add(file.path);
 		this.enqueue({ kind: "create", path: file.path, local });
+	}
+
+	/**
+	 * Reacts once more to a note created inside Obsidian, now that the metadata cache has indexed it. The entry is
+	 * used up when this runs, not when it is queued: if the first pass already acted (its claim was readable then),
+	 * it dropped the entry, and this pass is skipped, so a taken PDF name gives one notice, not two.
+	 */
+	private continueLocalCreate(path: string): void {
+		this.enqueue({ kind: "create", path, local: true }, () => this.pendingCreates.consume(path));
 	}
 
 	/** Deleted notes are handled by `onNoteDeleted`, which also gets the note's previous claim. */
@@ -148,9 +168,10 @@ export class Watcher {
 		return true;
 	}
 
-	private enqueue(event: VaultEvent): void {
+	/** Queues `event`; when its turn comes it is handled only if `shouldHandle` (asked then) agrees. */
+	private enqueue(event: VaultEvent, shouldHandle: () => boolean = () => true): void {
 		this.queue = this.queue
-			.then(() => this.handle(event))
+			.then(() => (shouldHandle() ? this.handle(event) : undefined))
 			.catch((error: unknown) => console.error("PDF Wrapper: event handling failed", event, error));
 	}
 
@@ -170,6 +191,8 @@ export class Watcher {
 				event = { ...event, linkedElsewhere: this.isLinkedElsewhere(event.claimedPdf, event.path) };
 			}
 			const reaction = react(event, snapshot);
+			// The create has been acted on (copied or explained): no second pass when the cache reports the note changed.
+			if (event.kind === "create" && reaction.actions.length > 0) this.pendingCreates.consume(event.path);
 			let recheck = reaction.recheck;
 			if (reaction.actions.length > 0) {
 				try {

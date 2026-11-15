@@ -107,6 +107,8 @@ in the checks above are the evidence.)
 - [ ] `fileManager.renameFile` onto an existing path throws rather than overwrites (the plugin checks first, so this only matters if the check races).
 - [ ] A case-only rename through `fileManager.renameFile` works on macOS and Windows, and `vault.getAbstractFileByPath` returns either nothing or the file itself for the new spelling.
 - [ ] `fileManager.trashFile` fires `vault` `delete` for the PDF (synchronously or not); the plugin then ignores it as its own change.
+- [ ] Obsidian's own copy action on a note ("Make a copy" / "Duplicate") goes through `Vault.copy` or `Vault.create`, so the copy reads as local (the in-app copy check under Duplicate copies the PDF).
+- [ ] `metadataCache` `changed` fires for a newly created note after it is created (the plugin re-checks a note copied in Obsidian then, because its marker is usually not indexed yet when the `create` event arrives).
 - [ ] `metadataCache` `changed` fires after a property is deleted in the properties panel, and after sync delivers a modified note (the unwrap check above and its second-device version below depend on it).
 - [ ] Note composer's merge deletes the merged note through `Vault.trash` or `Vault.delete` (so it reads as local), and by the time the plugin handles that delete, `metadataCache.resolvedLinks` already lists the new embed in the target note. If the cache lags, the PDF would be deleted: report it.
 - [ ] Whether `metadataCache.resolvedLinks` includes links held in another note's frontmatter properties (for example `attachments: "[[A.pdf]]"`), or only body links: delete a wrapped note whose PDF only another note's property links to, and record whether the PDF was kept.
@@ -173,6 +175,9 @@ The switch is Settings → PDF Wrapper → "Wrap new PDFs automatically". It is 
 - [ ] With `S 1.md` present but no `S 1.pdf`, duplicate `S`: both copies are named `S 2`.
 - [ ] The menu item and command are absent for a note without the marker, with a missing PDF, or with a PDF elsewhere or under another name (the command is not listed in the palette; the file menu has no item).
 - [ ] Trigger the command twice quickly: only one copy pair is made.
+- [ ] Right-click a wrapped note `S` and use Obsidian's own copy action ("Make a copy" or "Duplicate"): a PDF copy appears beside the note copy with the copy's name (for example `S 1.pdf`), the copy's marker and embed point at it, nothing is listed in Needs attention, the original note and PDF are unchanged, and with automatic wrapping on the copied PDF is not wrapped again.
+- [ ] Do the same when `<copy name>.pdf` already exists (for example create `S 1.pdf` first): nothing is overwritten, the notice "Copied S 1.md, but could not copy its PDF: a file named S 1.pdf already exists. The copy is listed under documents needing attention." appears once, and the copy is listed.
+- [ ] Copy a wrapped note in Finder: no PDF is copied and the copy is listed with "Points at another document's PDF".
 
 ## File explorer
 

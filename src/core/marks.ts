@@ -63,6 +63,49 @@ export class OwnChanges {
 	}
 }
 
+/** How long a note created inside Obsidian waits for the metadata cache to index it. */
+export const PENDING_CREATE_TTL_MS = 10000;
+
+/**
+ * Notes just created inside Obsidian whose claim the metadata cache may not have indexed yet when their `create`
+ * event is handled. The Watcher reacts to them once more when the cache reports them changed.
+ */
+export class PendingCreates {
+	private readonly expiries = new Map<string, number>();
+
+	constructor(private readonly now: Clock = Date.now) {}
+
+	/** Remembers `path` for PENDING_CREATE_TTL_MS from now, restarting the expiry if it is already remembered. */
+	add(path: string): void {
+		const now = this.now();
+		// Forget expired entries nobody asked about again, so the map stays small.
+		for (const [pendingPath, expires] of this.expiries) {
+			if (expires <= now) this.expiries.delete(pendingPath);
+		}
+		this.expiries.set(path, now + PENDING_CREATE_TTL_MS);
+	}
+
+	/** True while `path` is remembered and has not expired. Does not use it up. */
+	has(path: string): boolean {
+		const expires = this.expiries.get(path);
+		if (expires === undefined) return false;
+		if (expires > this.now()) return true;
+		this.expiries.delete(path);
+		return false;
+	}
+
+	/** True, once, while `path` is remembered and has not expired. */
+	consume(path: string): boolean {
+		const pending = this.has(path);
+		this.expiries.delete(path);
+		return pending;
+	}
+
+	clear(): void {
+		this.expiries.clear();
+	}
+}
+
 /**
  * Paths being changed by this device's own Obsidian (see LocalIntent). A file mark is used up by the first
  * `consume` that matches it. A folder mark is not used up: it answers for the folder itself and for every path

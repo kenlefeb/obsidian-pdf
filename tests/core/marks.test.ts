@@ -1,5 +1,5 @@
 import { expect, test } from "vitest";
-import { IntentMarks, MARK_TTL_MS, OwnChanges } from "../../src/core/marks.ts";
+import { IntentMarks, MARK_TTL_MS, OwnChanges, PENDING_CREATE_TTL_MS, PendingCreates } from "../../src/core/marks.ts";
 
 function clock(start = 1000) {
 	let now = start;
@@ -84,4 +84,43 @@ test("intent: release removes only its own mark", () => {
 	const second = marks.mark("m.md", false);
 	second();
 	expect(marks.consume("m.md")).toBe(false);
+});
+
+test("pending creates: consumed once", () => {
+	const pending = new PendingCreates(clock().now);
+	pending.add("a/S 1.md");
+	expect(pending.has("a/S 1.md")).toBe(true);
+	expect(pending.has("a/S 1.md")).toBe(true);
+	expect(pending.consume("a/S 1.md")).toBe(true);
+	expect(pending.has("a/S 1.md")).toBe(false);
+	expect(pending.consume("a/S 1.md")).toBe(false);
+	expect(pending.consume("b.md")).toBe(false);
+});
+
+test("pending creates: expire after 10000 ms", () => {
+	const c = clock();
+	const pending = new PendingCreates(c.now);
+	expect(PENDING_CREATE_TTL_MS).toBe(10000);
+	pending.add("a.md");
+	c.advance(PENDING_CREATE_TTL_MS - 1);
+	expect(pending.has("a.md")).toBe(true);
+	expect(pending.consume("a.md")).toBe(true);
+	pending.add("b.md");
+	c.advance(PENDING_CREATE_TTL_MS);
+	expect(pending.has("b.md")).toBe(false);
+	expect(pending.consume("b.md")).toBe(false);
+});
+
+test("pending creates: adding again restarts the expiry; clear forgets everything", () => {
+	const c = clock();
+	const pending = new PendingCreates(c.now);
+	pending.add("a.md");
+	c.advance(PENDING_CREATE_TTL_MS - 1);
+	pending.add("a.md");
+	c.advance(PENDING_CREATE_TTL_MS - 1);
+	expect(pending.has("a.md")).toBe(true);
+	pending.add("b.md");
+	pending.clear();
+	expect(pending.consume("a.md")).toBe(false);
+	expect(pending.consume("b.md")).toBe(false);
 });

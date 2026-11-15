@@ -260,3 +260,79 @@ test('autoWrapChecker answers as shouldAutoWrap does, for every PDF of one snaps
 	expect(check('a/Q.pdf')).toBe(true);    // a .txt of that name is not a note
 	expect(check('att/x.pdf')).toBe(true);
 });
+
+// An in-app copy of a wrapped note: copy its PDF under the copy's name and point the copy at it.
+const copiedNotice = (note: string, pdf: string): string =>
+	`Copied ${note}, but could not copy its PDF: a file named ${pdf} already exists. The copy is listed under documents needing attention.`;
+
+test('local copy of a wrapped note in the same folder copies the PDF and points the copy at it', () => {
+	const r = react({ kind: 'create', path: 'a/S 1.md', local: true },
+		snap(['a/S.md', 'a/S 1.md'], ['a/S.pdf'], [c('a/S.md', 'a/S.pdf'), c('a/S 1.md', 'a/S.pdf')]));
+	expect(r).toEqual({
+		actions: [
+			{ type: 'copy', from: 'a/S.pdf', to: 'a/S 1.pdf' },
+			{ type: 'setClaim', notePath: 'a/S 1.md', pdfPath: 'a/S 1.pdf', oldTargets: ['a/S.pdf', 'S.pdf', 'S'] }],
+		recheck: false, pendingRemoved: null });
+});
+test('local copy landing in another folder copies the PDF beside the copy', () => {
+	const r = react({ kind: 'create', path: 'b/Copy.md', local: true },
+		snap(['a/S.md', 'b/Copy.md'], ['a/S.pdf'], [c('a/S.md', 'a/S.pdf'), c('b/Copy.md', 'a/S.pdf')]));
+	expect(r).toEqual({
+		actions: [
+			{ type: 'copy', from: 'a/S.pdf', to: 'b/Copy.pdf' },
+			{ type: 'setClaim', notePath: 'b/Copy.md', pdfPath: 'b/Copy.pdf', oldTargets: ['a/S.pdf', 'S.pdf', 'S'] }],
+		recheck: false, pendingRemoved: null });
+});
+test('local copy keeps the PDF extension case', () => {
+	const r = react({ kind: 'create', path: 'a/S 1.md', local: true },
+		snap(['a/S.md', 'a/S 1.md'], ['a/S.PDF'], [c('a/S.md', 'a/S.PDF'), c('a/S 1.md', 'a/S.PDF')]));
+	expect(r).toEqual({
+		actions: [
+			{ type: 'copy', from: 'a/S.PDF', to: 'a/S 1.PDF' },
+			{ type: 'setClaim', notePath: 'a/S 1.md', pdfPath: 'a/S 1.PDF', oldTargets: ['a/S.PDF', 'S.PDF', 'S'] }],
+		recheck: false, pendingRemoved: null });
+});
+test('local copy in the vault root joins without a leading slash', () => {
+	const r = react({ kind: 'create', path: 'S 1.md', local: true },
+		snap(['S.md', 'S 1.md'], ['S.pdf'], [c('S.md', 'S.pdf'), c('S 1.md', 'S.pdf')]));
+	expect(r).toEqual({
+		actions: [
+			{ type: 'copy', from: 'S.pdf', to: 'S 1.pdf' },
+			{ type: 'setClaim', notePath: 'S 1.md', pdfPath: 'S 1.pdf', oldTargets: ['S.pdf', 'S.pdf', 'S'] }],
+		recheck: false, pendingRemoved: null });
+});
+test('local copy whose PDF name is taken by a PDF: one notice, nothing copied, rechecked', () => {
+	const r = react({ kind: 'create', path: 'a/S 1.md', local: true },
+		snap(['a/S.md', 'a/S 1.md'], ['a/S.pdf', 'a/S 1.pdf'], [c('a/S.md', 'a/S.pdf'), c('a/S 1.md', 'a/S.pdf')]));
+	expect(r).toEqual({ actions: [{ type: 'notice', message: copiedNotice('S 1.md', 'S 1.pdf') }], recheck: true, pendingRemoved: null });
+});
+test('local copy whose PDF name is taken differing only by case counts as taken', () => {
+	const r = react({ kind: 'create', path: 'a/S 1.md', local: true },
+		snap(['a/S.md', 'a/S 1.md'], ['a/S.pdf', 'a/s 1.pdf'], [c('a/S.md', 'a/S.pdf'), c('a/S 1.md', 'a/S.pdf')]));
+	expect(r).toEqual({ actions: [{ type: 'notice', message: copiedNotice('S 1.md', 'S 1.pdf') }], recheck: true, pendingRemoved: null });
+});
+test('a copy that is not local is not acted on', () => {
+	const r = react({ kind: 'create', path: 'a/S 1.md', local: false },
+		snap(['a/S.md', 'a/S 1.md'], ['a/S.pdf'], [c('a/S.md', 'a/S.pdf'), c('a/S 1.md', 'a/S.pdf')]));
+	expect(r).toEqual({ actions: [], recheck: true, pendingRemoved: null });
+});
+test('a local copy whose claim is unresolved is not acted on', () => {
+	const r = react({ kind: 'create', path: 'a/S 1.md', local: true },
+		snap(['a/S.md', 'a/S 1.md'], ['a/S.pdf'], [c('a/S.md', 'a/S.pdf'), c('a/S 1.md', null, 'a/Gone.pdf')]));
+	expect(r).toEqual({ actions: [], recheck: true, pendingRemoved: null });
+});
+test('a local note claiming a PDF that no note pairs with is not acted on', () => {
+	const r = react({ kind: 'create', path: 'b/X.md', local: true },
+		snap(['b/X.md', 'c/Y.md'], ['a/S.pdf'], [c('b/X.md', 'a/S.pdf'), c('c/Y.md', 'a/S.pdf')]));
+	expect(r).toEqual({ actions: [], recheck: true, pendingRemoved: null });
+});
+test('a local create of the pair\'s own note is not acted on', () => {
+	const r = react({ kind: 'create', path: 'a/S.md', local: true },
+		snap(['a/S.md'], ['a/S.pdf'], [c('a/S.md', 'a/S.pdf')]));
+	expect(r).toEqual({ actions: [], recheck: true, pendingRemoved: null });
+});
+test('a second identical event after the copy was made (now healthy) does nothing', () => {
+	const r = react({ kind: 'create', path: 'a/S 1.md', local: true },
+		snap(['a/S.md', 'a/S 1.md'], ['a/S.pdf', 'a/S 1.pdf'], [c('a/S.md', 'a/S.pdf'), c('a/S 1.md', 'a/S 1.pdf')]));
+	expect(r).toEqual({ actions: [], recheck: true, pendingRemoved: null });
+});

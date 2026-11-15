@@ -52,13 +52,14 @@ When you do these inside Obsidian on this device, both files follow (as far as t
 | Rename or move a folder holding wrapped documents | Both files of each pair move together. |
 | Delete a wrapped note (or a folder holding wrapped documents) | Deletes its PDF too, in the same way (see below). The PDF is kept if another note still claims it. It is also kept, with a notice, if other notes still link to or embed it (for example after merging the note into another one with Note composer); it is then listed with "Its note was deleted; the PDF was kept". |
 | Duplicate a wrapped document (file menu on the note, or the command **Duplicate wrapped document**) | Copies both files, named the way Obsidian names copies (`Statement 1.md` and `Statement 1.pdf`), and points the copy at its own PDF. |
+| Copy a wrapped note with Obsidian's own copy action ("Make a copy", or "Duplicate" in some versions), or any other in-app copy | Does the same as **Duplicate wrapped document**: copies the PDF under the copy's name, beside the copy, and points the copy's marker property and embed at it. If a file with the PDF's new name already exists, nothing is overwritten: a notice says so and the copy is listed as pointing at another document's PDF. The original is unaffected. |
 
 Other cases:
 
 - Deleting only the PDF leaves the note. It is then listed as missing its PDF.
 - Deleting a note whose pair is already broken does nothing to any PDF.
 - If the partner cannot follow (for example the new name is already taken), your action stands, a notice says so, and the pair is listed.
-- Copying a note by other means (for example in Finder) makes a second note pointing at the first note's PDF. It is listed with a fix that copies the PDF for it.
+- Copying a note outside Obsidian (for example in Finder, or a copy that arrives through sync) is not acted on: it makes a second note pointing at the first note's PDF, which is listed with a fix that copies the PDF for it.
 
 **Deleting follows your Obsidian setting.** The PDF is deleted the same way the note was: system trash, vault `.trash` folder, or permanent deletion, according to Settings, Files and links, Deleted files. If that is set to permanent deletion, the PDF is permanently deleted.
 

@@ -104,6 +104,29 @@ function reactToNoteDelete(path: string, local: boolean, claimedPdf: string | nu
 	return { actions: [{ type: "delete", path: claimedPdf }], recheck: false, pendingRemoved: null };
 }
 
+/**
+ * A note made inside Obsidian that claims the PDF of another note's healthy pair is a copy of that note (Obsidian's
+ * own copy action copies only the note): copy the PDF beside it, under its name, and point it at the copy.
+ * Contested, displaced or unresolved claims are left to the list.
+ */
+function reactToNoteCreate(path: string, local: boolean, snapshot: Snapshot): Reaction {
+	if (!local) return nothing();
+	const pdf = snapshot.claims.find((c) => c.notePath === path)?.pdfPath ?? null;
+	if (pdf === null || samePair(path, pdf)) return nothing();
+	if (!snapshot.claims.some((c) => c.notePath !== path && c.pdfPath === pdf && samePair(c.notePath, pdf))) return nothing();
+	const to = partnerDestination(path, pdf);
+	if (!isFree(to, path, snapshot)) {
+		const message = `Copied ${filename(path)}, but could not copy its PDF: a file named ${filename(to)} already exists. `
+			+ "The copy is listed under documents needing attention.";
+		return { actions: [{ type: "notice", message }], recheck: true, pendingRemoved: null };
+	}
+	const actions: Action[] = [
+		{ type: "copy", from: pdf, to },
+		{ type: "setClaim", notePath: path, pdfPath: to, oldTargets: [pdf, filename(pdf), basename(pdf)] },
+	];
+	return { actions, recheck: false, pendingRemoved: null };
+}
+
 function decide(event: VaultEvent, snapshot: Snapshot): Reaction {
 	switch (event.kind) {
 		case "rename":
@@ -115,7 +138,7 @@ function decide(event: VaultEvent, snapshot: Snapshot): Reaction {
 				? reactToNoteDelete(event.path, event.local, event.claimedPdf, event.linkedElsewhere !== false, snapshot)
 				: nothing();
 		case "create":
-			return nothing();
+			return isNote(event.path) ? reactToNoteCreate(event.path, event.local, snapshot) : nothing();
 	}
 }
 
