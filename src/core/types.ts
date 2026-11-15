@@ -21,3 +21,23 @@ export interface Classification {
 	pairs: PairStatus[];
 	unwrappedPdfs: string[];
 }
+
+export type VaultEvent =
+	| { kind: "rename"; path: string; oldPath: string; local: boolean }
+	| { kind: "delete"; path: string; local: boolean; claimedPdf: string | null } // for a deleted note: its resolved claim from the previous cache
+	| { kind: "create"; path: string; local: boolean };
+
+export type Action =
+	| { type: "rename"; from: string; to: string }
+	| { type: "copy"; from: string; to: string }
+	| { type: "setClaim"; notePath: string; pdfPath: string; oldTargets: string[] }
+	| { type: "removeClaim"; notePath: string }
+	| { type: "delete"; path: string }
+	| { type: "wrap"; pdfPath: string }
+	| { type: "notice"; message: string };
+
+export interface Reaction {
+	actions: Action[];
+	recheck: boolean;
+	pendingRemoved: string | null;
+}
