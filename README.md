@@ -50,7 +50,7 @@ When you do these inside Obsidian on this device, both files follow:
 | Rename or move a wrapped note | Renames or moves its PDF to match, and updates the marker property and the embed. |
 | Rename or move the PDF | Renames or moves the note to match. |
 | Rename or move a folder holding wrapped documents | Both files of each pair move together. |
-| Delete a wrapped note | Deletes its PDF too, in the same way (see below). The PDF is kept if another note still claims it. |
+| Delete a wrapped note (or a folder holding wrapped documents) | Deletes its PDF too, in the same way (see below). The PDF is kept if another note still claims it. |
 | Duplicate a wrapped document (file menu on the note, or the command **Duplicate wrapped document**) | Copies both files, named the way Obsidian names copies (`Statement 1.md` and `Statement 1.pdf`), and points the copy at its own PDF. |
 
 Other cases:
@@ -64,9 +64,14 @@ Other cases:
 
 ## Changes made outside Obsidian
 
-The plugin acts on its own only for something you did inside Obsidian on this device. Anything else (a change made in Finder or by another app, delivered by sync, or made while Obsidian was closed) is never acted on. It is protected and listed, and you decide.
+The design intent is that the plugin renames, moves and deletes a partner file only for changes it identifies as made inside Obsidian on this device. A change made in Finder or by another app, delivered by sync, or made while Obsidian was closed is meant to be protected and listed, so that you decide. A PDF whose note disappears from outside Obsidian is meant to be kept and listed.
 
-In particular the plugin never deletes a file because of a scan or because of something that arrived from outside. A PDF whose note disappears from outside Obsidian is kept and listed.
+**That identification has not been verified on any sync setup.** If it is wrong, the plugin could act on a change it should have left alone. See [What following relies on, and how it could go wrong](#what-following-relies-on-and-how-it-could-go-wrong) for the symptoms and the two settings that turn following off.
+
+There are two deliberate exceptions:
+
+- Automatic wrapping creates a note for a PDF that arrives from outside (after 15 to 30 seconds). It runs your template, including any Templater code, without you present, and a template that prompts will hold up the queue until it is answered.
+- Fixes you click in the Needs attention list change files. **Fix all** renames and moves files in bulk without asking for each one.
 
 A scan never changes files. It runs a couple of seconds after startup and when you run **Check wrapped documents**.
 
@@ -80,9 +85,9 @@ Run **Show documents needing attention** to open the list (**Check wrapped docum
 | PDF has a different name | The PDF is beside the note under another name. | Rename PDF to match; Rename note to match |
 | PDF is in another folder | The PDF exists elsewhere. | Move PDF beside note |
 | Points at another document's PDF | The note is typically a copy. | Copy the PDF; Remove the claim |
-| Shares a PDF with other notes | Several notes claim one PDF and none of them matches it. | Per note: move or rename the PDF to this note; Copy the PDF; Remove the claim |
-| Its note was removed outside Obsidian | The PDF is left over. | Delete the PDF (asks first); Wrap; Keep as a plain PDF |
-| Not wrapped | Shown only when automatic wrapping is on for this device. | Wrap |
+| Shares a PDF with 1 other note (or "N other notes") | Several notes claim one PDF and none of them matches it. | Per note: move or rename the PDF to this note; Copy the PDF; Remove the claim |
+| Its note was deleted; the PDF was kept | The note is gone and the PDF is left over: its note was removed outside Obsidian, or deleted in Obsidian with "Delete the PDF when its note is deleted in Obsidian" off. | Delete the PDF (asks first, then deletes the way Obsidian deletes files, following your "Deleted files" setting, which may be permanent); Wrap; Keep as a plain PDF |
+| Not wrapped | Shown only when automatic wrapping is on for this device. PDFs in a named attachment folder are left out. | Wrap |
 
 **Fix all** covers misnamed and displaced entries that have one claimant and a free destination; **Wrap all** covers unwrapped PDFs. Neither appears when it would do nothing. Nothing destructive is ever the default.
 
@@ -90,7 +95,7 @@ The list of "note removed" entries is kept in the plugin's data so that it survi
 
 ## One row in the file explorer
 
-With **Hide paired PDF files in the file explorer** on (the default), the PDF row of every healthy pair is hidden in the core file explorer, and the note's row shows a small "PDF" marker. This is done with generated styling rules only; the plugin does not touch the explorer's internals. If an Obsidian update defeats the hiding, you simply see two rows; pairing is unaffected.
+With **Hide paired PDF files in the file explorer** on (the default), the PDF row of every healthy pair is hidden in the core file explorer, and the note's row shows a small "PDF" marker. This is done with generated styling rules that rely on how the explorer's rows are marked up in Obsidian's HTML. The plugin does not patch or call into the explorer's code. If an Obsidian update changes that markup, the hiding stops and the PDF rows reappear; pairing is unaffected.
 
 Limits:
 
@@ -120,12 +125,12 @@ You do not have to set anything up.
 
 Placeholders are resolved by Templater when it is installed. Otherwise the core Templates placeholders `{{title}}`, `{{date}}` and `{{time}}` are used.
 
-The plugin no longer reads or writes the `attachment` / `attachments` properties. If you like to keep an `attachments` list, put it in your template; Obsidian's own link updating keeps it current on rename.
+The plugin no longer reads or writes the `attachment` / `attachments` properties. If you like to keep an `attachments` list, put it in your template; Obsidian's link updating can keep it current on rename, but that relies on its "Automatically update internal links" setting and has not been checked for links inside properties.
 
 ## Sync
 
 - **Automatic wrapping is per device**, so you can run it on every device and fall back to a single one if conflicting notes appear.
-- Changes that arrive by sync are never followed. A device that only receives a rename does not repeat it, so two devices cannot both rename the same PDF. If a pair looks broken after a sync it is re-checked after a short wait, and it drops off the list if sync has since completed it.
+- The plugin is designed not to follow changes delivered by sync, so that two devices do not both rename the same PDF. Whether sync-delivered changes are always recognised as such has not been verified. If a pair looks broken after a sync it is re-checked after a short wait, and it drops off the list if sync has since completed it.
 - A PDF the sync service has not downloaded yet (iCloud can leave files in the cloud) looks like a missing PDF. The entry says so, and nothing destructive is the default.
 - Deletes made inside Obsidian follow your Obsidian "Deleted files" setting, which may be permanent deletion.
 - If two devices both find no template before settings have synced, each creates the default one. The contents are identical; the worst case is a duplicate file.
@@ -159,7 +164,7 @@ With both off the plugin never renames, moves or deletes your files on its own. 
 
 The plugin is not in the community plugin directory. Install it manually:
 
-1. Build `main.js` (see below) and take it with `manifest.json` and `styles.css` from the repository root. Version 2.0.0 has not been released yet, so the [releases page](https://github.com/kenlefeb/obsidian-pdf/releases) only has the old 1.0.0 behaviour.
+1. Build `main.js` (see below) and take it with `manifest.json` and `styles.css` from the repository root. Version 2.0.0 has not been released yet. At the time of writing the [releases page](https://github.com/kenlefeb/obsidian-pdf/releases) only has the old 1.0.0 behaviour.
 2. Create a folder `<vault>/.obsidian/plugins/pdf-wrapper/`.
 3. Copy the three files into that folder.
 4. Reload Obsidian and enable **PDF Wrapper** in Settings, Community plugins.

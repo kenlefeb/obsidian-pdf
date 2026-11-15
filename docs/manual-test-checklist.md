@@ -83,7 +83,7 @@ note" on (the defaults), on desktop and on a phone.
 - [ ] Delete a wrapped note whose PDF another note also claims: the PDF stays.
 - [ ] Delete a folder holding several pairs: no "Could not delete" or other error notice, every pair is gone together, and nothing from it lands in the trash outside that folder (the trash holds the folder, not loose files).
 - [ ] Delete only the PDF of a pair: the note stays.
-- [ ] Turn "Delete the PDF when its note is deleted in Obsidian" off, delete a wrapped note in Obsidian: the PDF stays.
+- [ ] Turn "Delete the PDF when its note is deleted in Obsidian" off, delete a wrapped note in Obsidian: the PDF stays and is listed with "Its note was deleted; the PDF was kept".
 - [ ] Turn "Rename and move the PDF with its note" off, rename a wrapped note in Obsidian: the PDF is not renamed.
 
 ### Assumptions about Obsidian the code relies on (unverified; confirm each)
@@ -114,7 +114,7 @@ listed. The startup check runs about two seconds after the vault loads, and agai
 notice appears. "Check wrapped documents" runs it on demand and opens the list; "Show documents needing
 attention" opens the list as last checked.
 
-- [ ] Delete a wrapped note in Finder (or Explorer) with Obsidian open: the PDF stays, and within a few seconds it is listed with "Its note was removed outside Obsidian". Restart Obsidian: the entry is still there. On three such entries, check each fix: "Keep as a plain PDF" removes the entry and changes no file; "Wrap" wraps it again; "Delete the PDF" first asks for confirmation naming the PDF, then deletes it as the "Deleted files" setting says.
+- [ ] Delete a wrapped note in Finder (or Explorer) with Obsidian open: the PDF stays, and within a few seconds it is listed with "Its note was deleted; the PDF was kept". Restart Obsidian: the entry is still there. On three such entries, check each fix: "Keep as a plain PDF" removes the entry and changes no file; "Wrap" wraps it again; "Delete the PDF" first asks for confirmation naming the PDF, then deletes it as the "Deleted files" setting says.
 - [ ] Delete a wrapped note in Finder, then delete its PDF in Finder too: the "note removed" entry disappears by itself (run "Check wrapped documents" if the list is not open).
 - [ ] Delete a wrapped note in Finder with Obsidian open, wait for its "note removed" entry, then copy the note back in Finder: on the next check the entry clears. Clicking "Delete the PDF" (and confirming) before it clears is refused with "A note named <note> now exists beside this PDF. Check the list again." and the PDF stays.
 - [ ] Rename a wrapped note in Finder with Obsidian open: the PDF is not renamed, and the pair is listed.
@@ -140,13 +140,13 @@ The switch is Settings → PDF Wrapper → "Wrap new PDFs automatically". It is 
 - [ ] Paste a PDF into another note with a specific "Default location for new attachments" folder set: the PDF lands in that folder and is not wrapped.
 - [ ] Drop 20 PDFs at once (a folder dragged in): each gets exactly one note, no PDF is skipped, and no note is created twice. Note how long the last one took. The notices are one "Wrapped 20 PDFs." at the end of the pass (not 20), and with 1 to 3 PDFs one "Wrapped <name>" each.
 - [ ] With the template path empty or pointing at a missing file, drop several PDFs: they are still wrapped (the template is created), with no failure notice.
-- [ ] Make wrapping fail for every PDF (for example a read-only folder), then drop 5 PDFs: one notice "Could not wrap 5 PDFs. First problem: ... The rest are listed under documents needing attention."; with a single PDF, its own message once. The PDFs are listed as Unwrapped.
+- [ ] Make wrapping fail for every PDF (for example a read-only folder), then drop 5 PDFs: one notice "Could not wrap 5 PDFs. First problem: ... The rest are listed under documents needing attention."; with a single PDF, its own message once. The PDFs are listed as "Not wrapped".
 - [ ] Wrap with a template that makes the embed update fail (so the wrap is incomplete): the PDF is wrapped, one notice with the problem, and no "Wrapped <name>" for it.
 - [ ] Toggle off during the settle period (within two seconds of dropping a PDF): the PDF is not wrapped.
 - [ ] Disable the plugin within two seconds of dropping a PDF: nothing is wrapped afterwards.
 - [ ] Leave a Templater prompt open during an automatic wrap: after 60 seconds the console shows a "PDF Wrapper:" warning; the wrap is not abandoned and later PDFs wait.
-- [ ] A PDF added while Obsidian was closed appears as "Unwrapped" in the list with "Wrap all", and is not wrapped on its own at startup.
-- [ ] Toggle off: no "Unwrapped" entries are listed, and the list refreshes straight away when the switch is flipped.
+- [ ] A PDF added while Obsidian was closed appears as "Not wrapped" in the list with "Wrap all", and is not wrapped on its own at startup.
+- [ ] Toggle off: no "Not wrapped" entries are listed, and the list refreshes straight away when the switch is flipped.
 - [ ] The toggle state differs per device: turn it on here, check another device still has it off.
 
 ## Duplicate

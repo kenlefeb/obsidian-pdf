@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What is this?
 
-**PDF Wrapper** — an Obsidian community plugin that keeps a markdown note and its PDF together as one *wrapped document*: the note and the PDF sit side by side (same folder, same base name, e.g. `Statement.md` + `Statement.pdf`), and the note carries a *marker property* (default `wrapped-pdf`) holding a link to the PDF. In-app renames, moves, deletes and duplicates apply to both files; changes made outside Obsidian are listed in a "Needs attention" list with one-click fixes, never acted on directly. Optionally every new PDF is wrapped automatically, and in the core file explorer a healthy pair shows as one row.
+**PDF Wrapper** — an Obsidian plugin (not in the community directory) that keeps a markdown note and its PDF together as one *wrapped document*: the note and the PDF sit side by side (same folder, same base name, e.g. `Statement.md` + `Statement.pdf`), and the note carries a *marker property* (default `wrapped-pdf`) holding a link to the PDF. In-app renames, moves, deletes and duplicates apply to both files; changes made outside Obsidian are listed in a "Needs attention" list with one-click fixes, never acted on directly. Optionally every new PDF is wrapped automatically, and in the core file explorer a healthy pair shows as one row.
 
 Plugin ID: `pdf-wrapper` (in `manifest.json`); npm package `obsidian-pdf-wrapper`. Current version 2.0.0 (not released or tagged).
 
@@ -43,7 +43,7 @@ Tests import with the `.ts` extension (`import { x } from '../../src/core/x.ts'`
 2. **The plugin acts on its own only for changes identified as local** (made inside Obsidian on this device, as seen through `LocalIntent`). A change not positively identified as local is treated as not local: it is protected and listed.
 3. **It never deletes outside a followed in-app delete.** A PDF is deleted only as part of a note deletion the user made in Obsidian on this device (and only if "Delete the PDF when its note is deleted in Obsidian" is on), or by an explicit confirmed "Delete the PDF" fix. Never because of a scan, a sync-delivered change or an outside change.
 4. **A scan never changes files.** Scans and refreshes only read; files change only through user-triggered fixes and followed in-app actions.
-5. **The explorer is touched by generated styling only.** One constructed stylesheet keyed on row paths. No explorer internals, no DOM observers, no patched explorer handlers. If it breaks, the user sees two rows and nothing else is affected.
+5. **The explorer is touched by styling rules only.** One constructed stylesheet keyed on row paths; no patching of, or calls into, the explorer view, no DOM observers. If it breaks, the user sees two rows and nothing else is affected.
 6. **Templates are edited by text insertion only.** Never parse and rewrite template frontmatter; it can mangle Templater expressions.
 7. **No second source of truth for pairs.** A pair is whatever the files and frontmatter say. The only stored extras are the settings and the list of "note removed outside Obsidian" PDFs, which is a reminder, not a record.
 8. **Actions are idempotent and every fix re-checks that the item is still as listed** before changing anything.
@@ -65,6 +65,7 @@ Not in the public type definitions; all are read defensively inside try/catch an
 - `app.plugins.plugins["templater-obsidian"]` — Templater lookup, its `templater.create_new_note_from_template(...)`, and `settings.templates_folder` (`src/pdf-wrapper.ts`).
 - `app.internalPlugins.getPluginById("templates")` — core Templates `instance.options` (`folder`, `dateFormat`, `timeFormat`) (`src/pdf-wrapper.ts`).
 - `vault.getConfig("attachmentFolderPath")` — the attachment folder, so PDFs landing in a specifically named folder are skipped by automatic wrapping and the unwrapped list (`src/obsidian/attention-store.ts`).
+- The core file explorer's markup: the selectors `.nav-file`, `.nav-file-title[data-path]` and `.nav-file-title-content`, and CSS `:has()`, in `src/core/explorer-css.ts`, applied through `document.adoptedStyleSheets` in `src/obsidian/explorer-style.ts`. Not guarded by try/catch; it fails soft by simply not matching, so rows reappear.
 - `window.moment` — date formatting for `{{date}}` / `{{time}}` (`src/pdf-wrapper.ts`).
 
 ## Wrapping of `Vault` and `FileManager` methods (`src/obsidian/local-intent.ts`)

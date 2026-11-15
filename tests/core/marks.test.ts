@@ -46,14 +46,11 @@ test("own change: release removes only its own mark when the same path was marke
 	expect(own.consume("a.pdf")).toBe(true);
 });
 
-test("intent: a file mark is consumed once, peek does not consume", () => {
+test("intent: a file mark is consumed once", () => {
 	const marks = new IntentMarks(clock().now);
 	marks.mark("n.md", false);
-	expect(marks.peek("n.md")).toBe(true);
-	expect(marks.peek("n.md")).toBe(true);
 	expect(marks.consume("n.md")).toBe(true);
 	expect(marks.consume("n.md")).toBe(false);
-	expect(marks.peek("n.md")).toBe(false);
 });
 
 test("intent: a folder mark answers for itself and everything inside until it expires", () => {
@@ -75,7 +72,6 @@ test("intent: a file mark expires after 5000 ms", () => {
 	const marks = new IntentMarks(c.now);
 	marks.mark("n.md", false);
 	c.advance(MARK_TTL_MS);
-	expect(marks.peek("n.md")).toBe(false);
 	expect(marks.consume("n.md")).toBe(false);
 });
 

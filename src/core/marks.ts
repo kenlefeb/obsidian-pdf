@@ -82,9 +82,4 @@ export class IntentMarks {
 	consume(path: string): boolean {
 		return this.marks.check(path, true);
 	}
-
-	/** What `consume(path)` would answer, without using a mark up. */
-	peek(path: string): boolean {
-		return this.marks.check(path, false);
-	}
 }

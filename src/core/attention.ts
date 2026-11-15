@@ -22,7 +22,7 @@ export function stateLine(item: AttentionItem, c: Classification): string {
 			return `Shares a PDF with ${others} other ${others === 1 ? "note" : "notes"}`;
 		}
 		case "note-removed":
-			return "Its note was removed outside Obsidian";
+			return "Its note was deleted; the PDF was kept";
 		case "unwrapped":
 			return "Not wrapped";
 	}

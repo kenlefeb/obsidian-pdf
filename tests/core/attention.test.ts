@@ -14,7 +14,7 @@ test('stateLine gives the plain-language state for each kind', () => {
 	expect(stateLine(item('misnamed', 'a/S.md', 'a/Scan 001.pdf'), none)).toBe('PDF has a different name: Scan 001.pdf');
 	expect(stateLine(item('displaced', 'a/S.md', 'b/c/S.pdf'), none)).toBe('PDF is in another folder: b/c');
 	expect(stateLine(item('extra-claim', 'a/S 1.md', 'a/S.pdf'), none)).toBe("Points at another document's PDF");
-	expect(stateLine(item('note-removed', null, 'a/S.pdf'), none)).toBe('Its note was removed outside Obsidian');
+	expect(stateLine(item('note-removed', null, 'a/S.pdf'), none)).toBe('Its note was deleted; the PDF was kept');
 	expect(stateLine(item('unwrapped', null, 'a/S.pdf'), none)).toBe('Not wrapped');
 });
 
