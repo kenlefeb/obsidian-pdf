@@ -22,3 +22,19 @@ test("leaves other embeds and plain links alone", () => {
 test("names with regex metacharacters", () => {
 	expect(rewriteEmbeds("![[a (1)+.pdf]]", ["a (1)+.pdf"], "b/a (1)+.pdf")).toBe("![[b/a (1)+.pdf]]");
 });
+
+test("matches old targets case-insensitively", () => {
+	expect(rewriteEmbeds("![[s.PDF]]", ["S.pdf"], "a/S.pdf")).toBe("![[a/S.pdf]]");
+});
+
+test("ignores whitespace around the target inside the brackets", () => {
+	expect(rewriteEmbeds("![[ S.pdf ]]", ["S.pdf"], "a/S.pdf")).toBe("![[a/S.pdf]]");
+});
+
+test("keeps an alias-only embed's alias", () => {
+	expect(rewriteEmbeds("![[S.pdf|300]]", ["S.pdf"], "a/S.pdf")).toBe("![[a/S.pdf|300]]");
+});
+
+test("keeps a placeholder's subpath", () => {
+	expect(rewriteEmbeds("![[{{title}}.pdf#page=2]]", [], "a/S.pdf")).toBe("![[a/S.pdf#page=2]]");
+});
