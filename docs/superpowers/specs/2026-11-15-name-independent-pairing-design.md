@@ -49,15 +49,16 @@ Everything below marked *(call)* is the designer's decision.
 2. Everything the owner has tested and accepted keeps working: wrapping from
    the menu, following in-app rename, move and delete, explorer hiding,
    pairing a hand-made pair by adding the property.
-3. Existing wrapped notes in the old format keep working as pairs and can be
-   converted with one click.
+3. Existing wrapped notes that link to their PDF keep working as pairs and can
+   be converted with one click.
 
 ## Non-goals
 
 - Recovering *where a PDF went* by following a link. There is no link any
   more; recovery is by name and folder. See "What gets weaker".
 - Showing the PDF in the note when the plugin is not installed.
-- Options inside the block (page, size). The block's content is reserved.
+- Options inside the block (page, size). The block's content is reserved. An
+  embed that carried a page or size (`![[X.pdf#page=3]]`) loses it on Convert.
 
 ## What gets weaker (accepted by the owner in choosing this option)
 
@@ -85,12 +86,18 @@ the PDF.
 
 **PDF not found.** A marked note with no same-named PDF beside it.
 
-**Old format.** A marked note whose marker is a link, or whose body embeds its
-own PDF with a literal `![[…]]`. It works as a pair but still has the problem
-this change removes, until converted.
+**Links to its own PDF.** A marked note that still refers to its PDF by name
+anywhere: a link-valued marker (the old format), an entry in any other
+property such as `attachments`, or a link or embed in the body. Found from
+Obsidian's own record of the note's links. Such a note works as a pair but
+still has the problem this change removes, until converted. The owner decided
+that the plugin lists these and removes the links on Convert.
+
+The earlier advice that a template may list the PDF under `attachments` is
+withdrawn: the `wrapped-pdf` flag says the same thing without a link.
 
 **Unwrapped PDF.** A PDF with no marked note of its name beside it, and which
-no old-format note's marker link points to. An old-format link still protects
+no old-format note's marker link points to. A link-valued marker still protects
 its PDF until the note is converted: that PDF is not listed as Not wrapped, not
 offered to other notes, and not wrapped automatically. *(call)*
 
@@ -113,9 +120,13 @@ at every launch.) *(call)*
   parts are the marker line and the block. A template that has the old
   placeholder embed (`![[{{title}}.pdf]]` and the variants handled today) has
   that embed **replaced by the block**, and the user is told. *(call)*
-- After the note is created, any literal embed of this PDF in its body is
-  replaced by the block, and a link-valued marker is replaced by `true`, so a
-  template the plugin could not repair still yields a new-format note.
+- After the note is created it is converted exactly as Convert would (above):
+  a link-valued marker becomes `true`, the PDF is taken out of other
+  properties, embeds become the block and plain links become text. So a
+  template the plugin could not repair, or one that lists the PDF under
+  `attachments`, still yields a note with no link to its PDF. When this
+  removes something the template put there, the user is told which property
+  or line, so they can fix the template. *(call)*
 
 ### The block
 
@@ -164,11 +175,11 @@ A scan still never changes files.
 | Entry | Fixes offered |
 |---|---|
 | PDF not found | **Use a PDF**: pick from unwrapped PDFs (same folder first, then same name elsewhere); it is moved and renamed to the note's name. **Rename note to match**: for an unwrapped PDF in the same folder, the note takes the PDF's name instead. **Copy another document's PDF**: pick a wrapped document; its PDF is copied under this note's name. **Remove the marker.** |
-| Old format | **Convert**: if the marker's link points to a PDF that is not beside the note under its name, that PDF is first moved and renamed there (refused, with a notice, if the name is taken or another note's marker points to the same PDF); then the marker becomes `true` and literal embeds of the PDF become the block. If the linked PDF does not exist, the note is converted and then shows as PDF not found. *(call)* |
+| Links to its own PDF | **Convert**, which does all of the following to that one note, after saying what it will do: (1) if the marker is a link to a PDF that is not beside the note under its name, that PDF is first moved and renamed there (refused, with a notice, if the name is taken or another note's marker points to the same PDF); (2) the marker becomes `true`; (3) the PDF is taken out of every other property: removed from a list, leaving the other entries; a property holding only that link is emptied; (4) in the body, each embed of the PDF becomes the block, and each plain link to it becomes its display text. If the marker's PDF does not exist, the note is converted and then shows as PDF not found. *(calls: the details of 3 and 4)* |
 | Its note was deleted; the PDF was kept | Unchanged. |
 | Not wrapped | Unchanged. |
 
-"Fix all" becomes "Convert all" *(call)*. It covers only Old format entries
+"Fix all" becomes "Convert all" *(call)*. It covers only "Links to its own PDF" entries
 whose PDF is already beside the note under its name, so the bulk action never
 moves a file. There is no bulk fix for PDF not found: every such entry needs a
 choice.
@@ -219,17 +230,21 @@ Unchanged. Hiding still keys on healthy pairs. No new setting.
 
 ## Migration
 
-- Notes wrapped by test builds so far are Old format: they keep working and
-  are listed with Convert / Convert all.
+- Notes wrapped by test builds so far link to their own PDF: they keep
+  working and are listed with Convert / Convert all.
 - The owner's real documents are not wrapped yet; their one-time migration
-  writes the new format directly: move each PDF beside its note under the
-  note's name, set the marker to `true`, replace the PDF embed with the block.
+  writes the new form directly: move each PDF beside its note under the
+  note's name, set the marker to `true`, take the PDF out of `attachments`,
+  replace the PDF embed with the block. A migration that only moves the PDFs
+  and adds the marker also works: the notes are then listed and Convert all
+  does the rest.
 
 ## Left to the builder
 
 - How the block re-renders when files change.
 - Module changes in the pure core (classification, reactions, fixes); the
   existing split between `src/core` and `src/obsidian` stays.
-- Whether old-format detection reuses the existing claim and embed parsers.
+- Whether detection of links to the note's own PDF reuses the existing claim,
+  embed and link parsers or reads Obsidian's link records.
 - Order of work, provided the pure core changes come first with their tests.
 - Updating the main spec, README, CLAUDE.md and the manual checklist to match.
