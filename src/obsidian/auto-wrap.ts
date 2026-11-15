@@ -39,7 +39,10 @@ export class AutoWrapper {
 		private readonly executor: Executor,
 		private readonly getSettings: () => PdfWrapperSettings,
 		private readonly attachmentFolder: () => string | null,
-		/** Called after each wrap, so lists built from the vault can refresh while a long pass runs. */
+		/**
+		 * Called after each wrap attempt, so lists built from the vault can refresh while a long pass runs. The wraps
+		 * skip the Executor's own after-run refresh, so this should be a coalescing refresh.
+		 */
 		private readonly onWrapped: () => void = () => undefined,
 	) {}
 
@@ -106,7 +109,8 @@ export class AutoWrapper {
 				this.pending.delete(next);
 				const outcome = await this.wrapOne(next);
 				outcomes.push(outcome);
-				if ((outcome.kind === "wrapped" || outcome.kind === "incomplete") && !this.unloaded) this.onWrapped();
+				// Also after a failure: the note may have been created before a later step failed.
+				if (!this.unloaded) this.onWrapped();
 			}
 		} catch (error) {
 			console.error("PDF Wrapper: automatic wrapping stopped", error);
@@ -130,7 +134,8 @@ export class AutoWrapper {
 		}, SLOW_WRAP_MS);
 		try {
 			// Quiet: the Executor would show a notice per failure; the pass shows one summary instead.
-			if (!(await this.executor.run([{ type: "wrap", pdfPath: path }], { quiet: true }))) return { kind: "skipped" };
+			// skipAfterRun: the pass calls `onWrapped` itself after every wrap.
+			if (!(await this.executor.run([{ type: "wrap", pdfPath: path }], { quiet: true, skipAfterRun: true }))) return { kind: "skipped" };
 			return { kind: "wrapped", name };
 		} catch (error) {
 			if (error instanceof WrapIncomplete) return { kind: "incomplete", name, message: error.message };

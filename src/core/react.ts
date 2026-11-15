@@ -1,4 +1,4 @@
-import { basename, dirname, filename, isInFolder, isNote, isPdf, joinPath, samePair } from "./paths.ts";
+import { basename, dirname, filename, isInFolder, isNote, isPdf, joinPath, pairKey, samePair } from "./paths.ts";
 import type { Action, NoteClaim, Reaction, Snapshot, VaultEvent } from "./types.ts";
 
 const nothing = (recheck = false, pendingRemoved: string | null = null): Reaction => ({ actions: [], recheck, pendingRemoved });
@@ -120,10 +120,20 @@ export function react(event: VaultEvent, snapshot: Snapshot): Reaction {
 
 /** True for a PDF nobody claims and no note sits beside, outside the attachment folder. */
 export function shouldAutoWrap(pdfPath: string, snapshot: Snapshot, attachmentFolder: string | null): boolean {
-	return snapshot.pdfPaths.includes(pdfPath)
-		&& !snapshot.claims.some((c) => c.pdfPath === pdfPath)
-		&& !snapshot.notePaths.some((n) => isNote(n)
-			&& dirname(n).toLowerCase() === dirname(pdfPath).toLowerCase()
-			&& basename(n).toLowerCase() === basename(pdfPath).toLowerCase())
+	return autoWrapChecker(snapshot, attachmentFolder)(pdfPath);
+}
+
+/**
+ * `shouldAutoWrap` for many PDFs of one snapshot: indexes the snapshot once (PDF paths, claimed PDFs, and the
+ * lower-cased folder and base name of every note), so each check takes constant time.
+ */
+export function autoWrapChecker(snapshot: Snapshot, attachmentFolder: string | null): (pdfPath: string) => boolean {
+	const pdfs = new Set(snapshot.pdfPaths);
+	const claimed = new Set<string>();
+	for (const claim of snapshot.claims) if (claim.pdfPath !== null) claimed.add(claim.pdfPath);
+	const notes = new Set(snapshot.notePaths.filter(isNote).map(pairKey));
+	return (pdfPath) => pdfs.has(pdfPath)
+		&& !claimed.has(pdfPath)
+		&& !notes.has(pairKey(pdfPath))
 		&& (attachmentFolder === null || !isInFolder(pdfPath, attachmentFolder));
 }

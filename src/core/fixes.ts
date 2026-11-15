@@ -118,9 +118,13 @@ function taken(verb: string, from: string, to: string): Action[] {
 	return [{ type: "notice", message: `Could not ${verb} ${from} to ${to}: a file with that name already exists.` }];
 }
 
-/** The file actions a fix performs. Never overwrites: a taken destination yields a single notice. */
-export function planFix(item: AttentionItem, fix: FixId, snapshot: Snapshot, chosenPdf?: string): Action[] {
-	if (!fixesFor(item.kind).includes(fix) || !isCurrent(item, snapshot)) return STALE;
+/**
+ * The file actions a fix performs. Never overwrites: a taken destination yields a single notice.
+ * `precomputed` is `classify(snapshot)` when the caller already has it.
+ */
+export function planFix(item: AttentionItem, fix: FixId, snapshot: Snapshot, chosenPdf?: string, precomputed?: Classification): Action[] {
+	const c = precomputed ?? classify(snapshot);
+	if (!fixesFor(item.kind).includes(fix) || !isCurrent(item, snapshot, c)) return STALE;
 	switch (fix) {
 		case "keep-plain":
 			return [];
@@ -164,7 +168,7 @@ export function planFix(item: AttentionItem, fix: FixId, snapshot: Snapshot, cho
 		case "choose-pdf": {
 			const notePath = need(item.notePath, "a note", fix);
 			const from = need(chosenPdf, "a chosen PDF", fix);
-			if (!classify(snapshot).unwrappedPdfs.includes(from)) {
+			if (!c.unwrappedPdfs.includes(from)) {
 				return [{ type: "notice", message: `${from} is no longer available. Pick again.` }];
 			}
 			const to = partnerDestination(notePath, from);
@@ -178,10 +182,13 @@ export function planFix(item: AttentionItem, fix: FixId, snapshot: Snapshot, cho
 	}
 }
 
-/** True when the default fix can be applied in a batch: a lone claim, a free destination, no copying. */
-export function isBulkFixable(item: AttentionItem, snapshot: Snapshot): boolean {
+/**
+ * True when the default fix can be applied in a batch: a lone claim, a free destination, no copying.
+ * `precomputed` is `classify(snapshot)` when the caller already has it.
+ */
+export function isBulkFixable(item: AttentionItem, snapshot: Snapshot, precomputed?: Classification): boolean {
 	if ((item.kind !== "misnamed" && item.kind !== "displaced") || item.notePath === null || item.pdfPath === null) return false;
-	if (!isCurrent(item, snapshot)) return false;
+	if (!isCurrent(item, snapshot, precomputed)) return false;
 	const claims = snapshot.claims.filter((claim) => claim.pdfPath === item.pdfPath);
 	if (claims.length !== 1 || claims[0]?.notePath !== item.notePath) return false;
 	return !isTaken(partnerDestination(item.notePath, item.pdfPath), snapshot, item.pdfPath);

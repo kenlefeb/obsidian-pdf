@@ -1,4 +1,4 @@
-import { shouldAutoWrap } from "./react.ts";
+import { autoWrapChecker } from "./react.ts";
 import type { Snapshot } from "./types.ts";
 
 /** How long a PDF created by an action inside Obsidian on this device settles before it is judged. */
@@ -45,10 +45,12 @@ export function planAutoWrap(
 	attachmentFolder: string | null,
 ): AutoWrapPlan {
 	const plan: AutoWrapPlan = { wrap: [], drop: [], waitUntil: null };
+	// Indexed once per call: a pass over hundreds of new PDFs in a large vault must not compare every pair of files.
+	const shouldWrap = autoWrapChecker(snapshot, attachmentFolder);
 	for (const { path, due } of pending) {
 		if (due > now) {
 			plan.waitUntil = plan.waitUntil === null ? due : Math.min(plan.waitUntil, due);
-		} else if (shouldAutoWrap(path, snapshot, attachmentFolder)) {
+		} else if (shouldWrap(path)) {
 			plan.wrap.push(path);
 		} else {
 			plan.drop.push(path);

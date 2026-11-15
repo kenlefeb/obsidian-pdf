@@ -127,8 +127,8 @@ export class AttentionStore {
 
 	/** Applies the default fix to every entry "Fix all" covers. Resolves to the number fixed. */
 	fixAll(): Promise<number> {
-		return this.bulkRun("fix", (item, snapshot) =>
-			isBulkFixable(item, snapshot) ? fixesFor(item.kind)[0] ?? null : null);
+		return this.bulkRun("fix", (item, snapshot, c) =>
+			isBulkFixable(item, snapshot, c) ? fixesFor(item.kind)[0] ?? null : null);
 	}
 
 	/**
@@ -136,7 +136,7 @@ export class AttentionStore {
 	 * PDFs at the same time, so a PDF another wrap got to first is skipped, not a failure. Resolves to the number wrapped.
 	 */
 	wrapAll(): Promise<number> {
-		return this.bulkRun("wrap", (item, snapshot) => isBulkWrappable(item, snapshot) ? "wrap" : null);
+		return this.bulkRun("wrap", (item, snapshot, c) => isBulkWrappable(item, snapshot, c) ? "wrap" : null);
 	}
 
 	onChange(listener: () => void): () => void {
@@ -149,21 +149,29 @@ export class AttentionStore {
 	 * each time. Stops at the first failure. Wraps run quietly: a refused wrap (another wrap got there first, or the
 	 * PDF cannot be wrapped) is skipped without a notice, and only another failure is reported here and stops the run.
 	 */
-	private bulkRun(kind: "fix" | "wrap", pick: (item: AttentionItem, snapshot: Snapshot) => FixId | null): Promise<number> {
+	private bulkRun(
+		kind: "fix" | "wrap",
+		pick: (item: AttentionItem, snapshot: Snapshot, c: Classification) => FixId | null,
+	): Promise<number> {
 		return this.serial(async () => {
 			let done = 0;
 			let stopped = false;
+			// False only while the last in-loop rescan already shows the vault as this run left it.
+			let needRescan = true;
 			try {
 				for (const item of [...this.list]) {
 					if (this.unloaded) break;
 					const snapshot = this.snapshot();
-					const fix = pick(item, snapshot);
+					// Classified once per snapshot, for both the pick and the plan.
+					const c = classify(snapshot);
+					const fix = pick(item, snapshot, c);
 					if (fix === null) continue;
+					needRescan = true;
 					let counted = false;
 					try {
 						// False means a file vanished under us: that item is skipped, not counted, and the run goes on.
 						// Only a throw is a failure that stops the run.
-						counted = await this.executor.run(planFix(item, fix, snapshot), { skipAfterRun: true, quiet: kind === "wrap" });
+						counted = await this.executor.run(planFix(item, fix, snapshot, undefined, c), { skipAfterRun: true, quiet: kind === "wrap" });
 					} catch (error) {
 						if (error instanceof WrapRefusal) {
 							// Automatic wrapping (or a click) is wrapping it, its note appeared, or it cannot be wrapped: skip it.
@@ -185,15 +193,17 @@ export class AttentionStore {
 						done++;
 						// Let listeners (the explorer styling) see progress while the run goes on; not through `serial`.
 						await this.rescan([]);
+						needRescan = false;
 					}
 				}
 			} catch (error) {
 				// Something other than a file action failed, for example reading the vault.
 				console.error("PDF Wrapper: bulk fix failed", error);
 				stopped = true;
+				needRescan = true;
 			} finally {
 				if (!this.unloaded) new Notice(bulkResultMessage(kind, done, stopped));
-				await this.rescan([]);
+				if (needRescan) await this.rescan([]);
 				if (done > 0) this.scheduleFollowUp();
 			}
 			return done;
@@ -233,7 +243,7 @@ export class AttentionStore {
 			});
 			this.scanned = true;
 			this.bulk = {
-				fix: this.list.filter((item) => isBulkFixable(item, snapshot)).length,
+				fix: this.list.filter((item) => isBulkFixable(item, snapshot, c)).length,
 				// The same test "Wrap all" applies to each entry, so the button's presence matches what it would attempt.
 				wrap: this.list.filter((item) => isBulkWrappable(item, snapshot, c)).length,
 			};

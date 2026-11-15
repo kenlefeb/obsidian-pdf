@@ -337,3 +337,25 @@ test('rename-note-to-pdf and copy also carry the raw target', () => {
 	expect(planFix(item('extra-claim', 'a/S 1.md', 'a/S.pdf', 'S'), 'copy-pdf-for-note', s2)[1]).toEqual(
 		{ type: 'setClaim', notePath: 'a/S 1.md', pdfPath: 'a/S 1.pdf', oldTargets: ['a/S.pdf', 'S.pdf', 'S'] });
 });
+
+// precomputed classification
+test('isCurrent, isBulkFixable and planFix use a precomputed classification when given', () => {
+	const s = snap(['a/S.md'], ['att/X.pdf'], [c('a/S.md', 'att/X.pdf')]);
+	const displaced = item('displaced', 'a/S.md', 'att/X.pdf');
+	const real = classify(s);
+	expect(isCurrent(displaced, s, real)).toBe(true);
+	expect(isBulkFixable(displaced, s, real)).toBe(true);
+	expect(planFix(displaced, 'move-pdf-to-note', s, undefined, real)).toEqual(planFix(displaced, 'move-pdf-to-note', s));
+	// A classification that disagrees with the snapshot is the one that counts.
+	const other = { pairs: [{ ...c('a/S.md', 'att/X.pdf'), state: 'misnamed' as const }], unwrappedPdfs: [] };
+	expect(isCurrent(displaced, s, other)).toBe(false);
+	expect(isBulkFixable(displaced, s, other)).toBe(false);
+	expect(planFix(displaced, 'move-pdf-to-note', s, undefined, other)).toEqual(STALE);
+});
+test('choose-pdf checks availability against the precomputed classification', () => {
+	const s = snap(['a/S.md'], ['att/Scan.pdf'], [c('a/S.md', null)]);
+	const missing = item('missing', 'a/S.md', null);
+	const noneFree = { pairs: [{ ...c('a/S.md', null), state: 'missing' as const }], unwrappedPdfs: [] };
+	expect(planFix(missing, 'choose-pdf', s, 'att/Scan.pdf', noneFree))
+		.toEqual([{ type: 'notice', message: 'att/Scan.pdf is no longer available. Pick again.' }]);
+});

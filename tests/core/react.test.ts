@@ -1,5 +1,5 @@
 import { expect, test } from 'vitest';
-import { react, shouldAutoWrap } from '../../src/core/react.ts';
+import { autoWrapChecker, react, shouldAutoWrap } from '../../src/core/react.ts';
 import type { NoteClaim, Snapshot } from '../../src/core/types.ts';
 
 const snap = (notePaths: string[], pdfPaths: string[], claims: NoteClaim[]): Snapshot => ({ notePaths, pdfPaths, claims });
@@ -219,4 +219,19 @@ test('shouldAutoWrap', () => {
 	expect(shouldAutoWrap('att/x.pdf', s, 'att')).toBe(false); // attachment folder
 	expect(shouldAutoWrap('att/x.pdf', s, null)).toBe(true);
 	expect(shouldAutoWrap('gone.pdf', s, null)).toBe(false);
+});
+test('autoWrapChecker answers as shouldAutoWrap does, for every PDF of one snapshot', () => {
+	const s = snap(['a/S.md', 'a/N.md', 'b/x.MD', 'S.md', 'a/Q.txt'],
+		['a/S.pdf', 'a/N.pdf', 'a/New.pdf', 'att/x.pdf', 'b/X.pdf', 'S.pdf', 'a/Q.pdf', 'A/n.PDF'],
+		[c('a/S.md', 'a/S.pdf'), c('S.md', 'a/New.pdf')]);
+	for (const folder of [null, 'att', '']) {
+		const check = autoWrapChecker(s, folder);
+		for (const pdf of [...s.pdfPaths, 'gone.pdf']) expect([pdf, folder, check(pdf)]).toEqual([pdf, folder, shouldAutoWrap(pdf, s, folder)]);
+	}
+	const check = autoWrapChecker(s, null);
+	expect(check('a/New.pdf')).toBe(false); // claimed by a note elsewhere
+	expect(check('b/X.pdf')).toBe(false);   // note of that name, other letter case
+	expect(check('A/n.PDF')).toBe(false);   // folder differs only by case
+	expect(check('a/Q.pdf')).toBe(true);    // a .txt of that name is not a note
+	expect(check('att/x.pdf')).toBe(true);
 });
