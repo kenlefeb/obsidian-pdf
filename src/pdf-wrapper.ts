@@ -2,7 +2,7 @@ import { App, normalizePath, Notice, TFile, TFolder, type TAbstractFile } from "
 import { isLinkSafeName } from "./core/claims.ts";
 import { dirname, findPathIgnoringCase, isNote, joinPath } from "./core/paths.ts";
 import type { PdfWrapperSettings } from "./core/settings-data.ts";
-import { pathList, templaterResult } from "./core/templater-outcome.ts";
+import { noteExistedMessage, notesAppearedMessage, templaterResult } from "./core/templater-outcome.ts";
 import {
 	defaultTemplate,
 	defaultTemplatePath,
@@ -80,17 +80,20 @@ function notifyWrapSucceeded(): void {
 	}
 }
 
-/** Where the note wrapping `pdf` lives: beside it, with the same base name. */
+/**
+ * Where the note wrapping `pdf` lives: beside it, with the same base name, normalised as Obsidian normalises the path
+ * of a file it creates (`normalizePath` also turns non-breaking spaces into spaces and composes Unicode). Every step of
+ * a wrap uses this one value, so the in-flight key, the existence checks, the creation and the rename-back agree.
+ */
 export function siblingNotePath(pdf: TFile): string {
-	return joinPath(dirname(pdf.path), `${pdf.basename}.md`);
+	return normalizePath(joinPath(dirname(pdf.path), `${pdf.basename}.md`));
 }
 
 /**
  * The path of whatever already occupies the PDF's note path, ignoring letter case (as a case-insensitive
- * file system would), or null when it is free.
+ * file system would), or null when it is free. `notePath` defaults to `siblingNotePath(pdf)`.
  */
-export function existingSiblingNote(app: App, pdf: TFile): string | null {
-	const notePath = siblingNotePath(pdf);
+export function existingSiblingNote(app: App, pdf: TFile, notePath: string = siblingNotePath(pdf)): string | null {
 	if (app.vault.getAbstractFileByPath(notePath)) return notePath;
 	const siblings = pdf.parent?.children.map((child) => child.path) ?? [];
 	return findPathIgnoringCase(siblings, notePath);
@@ -140,10 +143,7 @@ async function wrapOnce(
 	if (!folder) throw new Error(`Cannot determine the folder of ${pdfFile.path}.`);
 
 	const notePath = siblingNotePath(pdfFile);
-	const occupied = existingSiblingNote(app, pdfFile);
-	if (occupied) {
-		throw new WrapRefusal(`Cannot wrap ${pdfFile.name}: a note already exists at ${occupied}.`, "note-exists");
-	}
+	refuseIfNoteExists(app, pdfFile, notePath);
 
 	const templateFile = await prepareTemplate(app, settings, saveSettings);
 	if (templateFile.path.toLowerCase() === notePath.toLowerCase()) {
@@ -152,7 +152,7 @@ async function wrapOnce(
 
 	let created: CreatedNote;
 	try {
-		created = await createNoteFromTemplate(app, templateFile, folder, pdfFile, settings.markerProperty);
+		created = await createNoteFromTemplate(app, templateFile, folder, pdfFile, notePath, settings.markerProperty);
 	} catch (e) {
 		// Messages about what Templater did, shown as they are.
 		if (e instanceof WrapRefusal) throw e;
@@ -167,7 +167,8 @@ async function wrapOnce(
 	const note = created.file;
 	try {
 		if (note.path !== notePath) {
-			// Templater returned the note it created, but the template renamed or moved it: put it back beside the PDF.
+			// Only for a note Templater returned (a found note is at `notePath`, and the plugin creates its own there):
+			// the template renamed or moved it, so put it back beside the PDF.
 			await app.fileManager.renameFile(note, notePath);
 		}
 		await writeClaim(app, note, settings.markerProperty, pdfFile.path, [pdfFile.name, pdfFile.basename]);
@@ -189,6 +190,12 @@ async function wrapOnce(
 		}
 	}
 	return note;
+}
+
+/** Refuses the wrap, as a silent skip in bulk and automatic runs, when a note already occupies `notePath`. */
+function refuseIfNoteExists(app: App, pdfFile: TFile, notePath: string): void {
+	const occupied = existingSiblingNote(app, pdfFile, notePath);
+	if (occupied) throw new WrapRefusal(noteExistedMessage(pdfFile.name, occupied, []), "note-exists");
 }
 
 /**
@@ -386,10 +393,13 @@ async function createNoteFromTemplate(
 	templateFile: TFile,
 	folder: TFolder,
 	pdfFile: TFile,
+	notePath: string,
 	markerProperty: string,
 ): Promise<CreatedNote> {
 	const filename = pdfFile.basename;
-	const notePath = normalizePath(folder.isRoot() ? `${filename}.md` : `${folder.path}/${filename}.md`);
+	// Checked again here, after the awaits of preparing the template and with none before the snapshot below: a note
+	// that arrived meanwhile (for example by sync) is refused, not taken for Templater's.
+	refuseIfNoteExists(app, pdfFile, notePath);
 
 	// Try Templater plugin first — it handles its own placeholder resolution
 	const templater = getTemplaterPlugin(app);
@@ -409,7 +419,7 @@ async function createNoteFromTemplate(
 		const atPath = app.vault.getAbstractFileByPath(notePath);
 		const result = templaterResult({
 			threw,
-			noteAtExpectedPath: atPath instanceof TFile,
+			atPath: atPath instanceof TFile ? atPath : null,
 			before,
 			after: app.vault.getMarkdownFiles(),
 		});
@@ -420,6 +430,8 @@ async function createNoteFromTemplate(
 					return { file: atPath, made: false };
 				}
 				break;
+			case "note-existed":
+				throw new WrapRefusal(noteExistedMessage(pdfFile.name, result.path, result.others), "note-exists");
 			case "template-failed":
 				throw new WrapRefusal(
 					`Templater did not create a note for ${pdfFile.name}. Check its own message, fix the template or answer ` +
@@ -428,7 +440,7 @@ async function createNoteFromTemplate(
 				);
 			case "notes-appeared":
 				throw new WrapRefusal(
-					notesAppearedMessage(pdfFile.name, markerProperty, result.paths, result.threw, failure),
+					notesAppearedMessage(pdfFile.name, markerProperty, result.paths, result.threw ? reason(failure) : null),
 					"template-unclear",
 				);
 			case "create-manually":
@@ -442,20 +454,6 @@ async function createNoteFromTemplate(
 	const raw = await app.vault.read(templateFile);
 	const content = resolveCoreTemplatePlaceholders(app, raw, filename);
 	return { file: await app.vault.create(notePath, content), made: true };
-}
-
-/**
- * Templater handed back no note and none is beside the PDF, but notes appeared while it ran. Nothing is moved or
- * edited: the notes are named for the user to judge. `failure` is Templater's error when it threw.
- */
-function notesAppearedMessage(pdfName: string, markerProperty: string, paths: string[], threw: boolean, failure: unknown): string {
-	const notes = `Notes created while it ran: ${pathList(paths)}.`;
-	const move = `move it beside ${pdfName} and add the "${markerProperty}" property`;
-	if (threw) {
-		return `Templater failed: ${reason(failure)}. ${notes} Nothing was created for ${pdfName}; if one of them is its note, ` +
-			`${move}, otherwise wrap again.`;
-	}
-	return `Templater did not return a note for ${pdfName}. ${notes} If one of them is its note, ${move}; otherwise wrap again.`;
 }
 
 type MomentFn = () => { format: (fmt: string) => string };
