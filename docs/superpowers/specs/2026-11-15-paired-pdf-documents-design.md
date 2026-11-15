@@ -25,16 +25,22 @@ point to the new behaviour; everything else here is new.
    folder, same base name** (`Statement.md` + `Statement.pdf`).
 2. Rename, move, delete and duplicate apply to both files.
 3. Changes made outside Obsidian (Finder, sync, scripts), including while
-   Obsidian was closed, are detected. Unambiguous breaks are repaired; the rest
-   are listed for the user to resolve.
-4. In the core file explorer the pair looks like one file.
-5. The vault stays plain files that are fully usable without the plugin.
+   Obsidian was closed, are detected. Changes Obsidian sees happen are
+   followed automatically; breaks found afterwards are listed with one-click
+   fixes.
+4. It is safe on every device the owner uses, desktop and mobile, with vaults
+   synced by iCloud and by Obsidian Sync, and the plugin running on all of
+   them at once.
+5. In the core file explorer the pair looks like one file.
+6. The vault stays plain files that are fully usable without the plugin.
 
 ## Non-goals
 
 - Adopting the owner's existing hand-wrapped documents (PDFs currently in the
-  attachment folder). That is a separate one-time migration outside the
-  plugin. See "Side effect" under Needs attention.
+  attachment folder, listed under an `attachments` property). That is a
+  separate one-time migration outside the plugin, which moves each PDF beside
+  its note and adds the marker property defined below. The plugin ignores
+  those notes until then.
 - More than one PDF, or other file types, per document.
 - A custom container or archive file type. Rejected: Obsidian only indexes
   `.md`, so frontmatter inside a container would not be queryable.
@@ -110,11 +116,16 @@ Everything below marked *(call)* is the designer's decision, not something the
 owner specified. The owner saw a summary of the behaviour table and raised no
 objection, but has not confirmed details.
 
-**Claim.** A note *claims* a PDF when its frontmatter has an `attachment`
-property (or an `attachments` list) containing exactly one link that names a
-`.pdf` file and nothing else. Key matching is case-insensitive, as today. A
-note whose list holds more than one entry (PDF or otherwise) claims nothing
-and is ignored by the plugin. *(call)*
+**Claim.** A note *claims* a PDF when its frontmatter has the plugin's own
+marker property, `wrapped-pdf`, holding a single link to a `.pdf` file. The
+owner asked for a dedicated property so that notes the plugin did not wrap are
+never touched; the name `wrapped-pdf` is the designer's *(call)* and is fixed,
+not a setting. Notes without the property are invisible to the plugin,
+whatever else they link to.
+
+The plugin no longer reads or writes `attachment` / `attachments`. The owner
+usually keeps an `attachments` list; a template can still include the PDF
+there, and Obsidian's own link updating keeps it current on rename. *(call)*
 
 **Wrapped document (healthy pair).** A note that claims a PDF, where the PDF
 exists, is in the same folder, and has the same base name as the note.
@@ -136,7 +147,7 @@ renames. Only the other claimants are flagged. *(call)*
 A PDF with no claimant is simply an unwrapped PDF. It is never flagged; the
 plugin has no way to know it was once wrapped, by design.
 
-**Canonical form.** In a healthy pair the claim is written as
+**Canonical form.** In a healthy pair the `wrapped-pdf` value is written as
 `[[<vault path to pdf>|<pdf file name>]]` (the format the plugin writes
 today), and any embed of the PDF in the note body points at the same path.
 The plugin rewrites the claim and embed to canonical form whenever it repairs
@@ -153,9 +164,8 @@ the active PDF *(call)*.
   no longer moves.** The attachment-folder logic is removed.
 - Template handling is unchanged: Templater if present, otherwise the core
   Templates placeholders (`{{title}}`, `{{date}}`, `{{time}}`).
-- The claim is now required, so if the rendered template has neither
-  `attachment` nor `attachments`, the plugin adds `attachment`. (Today it only
-  fills a key that already exists.) *(call)*
+- The plugin always sets `wrapped-pdf` on the new note, whether or not the
+  template mentions it.
 - Embed placeholders in the template (`![[{{title}}.pdf]]` and the variants
   handled today) resolve to the canonical path.
 - Refuses, with a clear notice, if a note of that name already exists or no
@@ -163,8 +173,12 @@ the active PDF *(call)*.
 
 ### Live operations
 
-These react to Obsidian's vault events, which fire for in-app actions and for
-external changes Obsidian notices while running.
+These react to Obsidian's vault events. The same events fire for in-app
+actions, for external changes Obsidian notices while running, and for changes
+delivered by sync from another device; a plugin cannot officially tell these
+apart. Every response therefore waits for a settle period and then
+re-examines the pair, acting only if it is still out of step (see Sync
+safety).
 
 | Event | Response |
 |---|---|
@@ -198,19 +212,20 @@ claim. If the user copies only the note by other means, the copy claims the
 original's PDF; the copy is an Extra claim and shows in Needs attention with a
 "copy the PDF for this note" fix. The original is unaffected.
 
-### Scan and repair
+### Scan
 
-A scan runs once the vault has finished loading at startup, and on demand from
-a command. It examines every note with a claim.
+A scan runs at startup, after the vault has loaded and a settle period has
+passed, and on demand from a command. It examines every note with a claim and
+classifies it.
 
-Automatic repair is limited to one case *(call)*:
+**A scan never changes files.** *(call — this is stricter than the summary the
+owner saw, which had the scan auto-repair unambiguous cases. It was tightened
+once the owner confirmed iCloud and Obsidian Sync on every device: at launch
+a vault is often mid-sync, and a half-delivered rename is indistinguishable
+from a real break.)* Everything the scan finds is listed with one-click fixes.
 
-- **Misnamed**, where the PDF is claimed by this note only and the note-named
-  destination is free → rename the PDF to match the note. (When Obsidian was
-  closed, this state arises from the note being renamed externally, so the
-  note's name is taken as the intent.)
-
-Everything else is left untouched and listed. A scan never deletes or trashes.
+Before the startup notice is shown, entries are re-checked so that pairs sync
+has since completed drop off the list.
 
 ### Needs attention
 
@@ -221,19 +236,37 @@ fixes:
 | State | Fixes offered |
 |---|---|
 | Missing | Pick from candidate PDFs (unclaimed PDFs in the same folder first, then unclaimed PDFs anywhere whose name matches the note or the old claim); or remove the claim. |
-| Misnamed (not auto-repaired) | Rename PDF to match note; or rename note to match PDF. |
+| Misnamed | Rename PDF to match note (default); or rename note to match PDF. |
 | Displaced | Move the PDF beside the note (renaming to match). |
 | Extra claim | Copy the PDF for this note; or remove this note's claim. |
 | Contested | Per note: move/rename the PDF to this note; copy the PDF for this note; or remove this note's claim. |
 
-There is a "fix all" for Displaced entries where the PDF has a single claimant
-and the destination is free.
+There is a "fix all" covering Misnamed and Displaced entries where the PDF
+has a single claimant and the destination is free. The list must be usable on
+a phone.
 
-**Side effect, to be stated in the README.** A vault with hand-wrapped notes
-whose PDFs live in the attachment folder will show every one of them as
-Displaced. "Fix all" would bring those PDFs beside their notes. This is a
-consequence of the stateless model, not an adoption feature; the owner plans a
-separate migration and may or may not use it.
+A Missing PDF may simply not have been downloaded yet (iCloud can leave files
+in the cloud). The entry says so, and nothing destructive is ever offered as
+the default for Missing.
+
+### Sync safety
+
+The owner runs the plugin on every device, with some vaults on iCloud and some
+on Obsidian Sync. Design rules that follow *(calls)*:
+
+- **Settle, then reconcile.** No response to an event acts immediately. After
+  the settle period the pair is re-examined; if sync has already delivered the
+  partner's change, there is nothing to do.
+- **Idempotent.** Two devices reacting to the same change must converge on the
+  same files, not create duplicates. A rename whose destination already holds
+  the partner is a no-op.
+- **Nothing automatic at startup.** See Scan.
+- **Trash only, and slowly.** See Deleting. The grace period for deletes is
+  longer than the settle period for renames.
+- **Local intent, if detectable.** Spike 2 looks for a dependable way to tell
+  a change the user made on this device from one sync delivered. If one
+  exists, automatic responses are restricted to local changes, which removes
+  the race entirely. If not, the rules above stand.
 
 ### One file in the explorer
 
@@ -284,29 +317,39 @@ separate migration and may or may not use it.
   behaviour.
 - Three Dependabot PRs are open; merge or supersede as convenient.
 
-## Spikes (need the owner's hands in a real vault)
+## Spikes (need the owner's hands in real vaults)
 
 These are throwaway and gate decisions in the plan.
 
 1. **Explorer hiding at scale.** Hide several hundred, then a few thousand,
-   rows by styling rules. Look for gaps or missing rows, and behaviour after
-   restart. If it misbehaves at the owner's real document count, ship the
-   setting defaulting to off and say so.
-2. **Event shapes.** Record what Obsidian reports for: in-app rename, move,
-   delete; folder move; external rename/move/delete with Obsidian open; and
-   the same arriving through the owner's sync. This confirms the settle delay
-   and the delete grace period.
+   rows by styling rules, on desktop and on mobile. Look for gaps or missing
+   rows, and behaviour after restart. If it misbehaves at the owner's real
+   document count, ship the setting defaulting to off and say so.
+2. **Event shapes under sync.** With a logging build, in one iCloud vault and
+   one Obsidian Sync vault, with a second device (including a phone) open:
+   record what each device reports for in-app rename, move and delete of a
+   note and of a PDF; a folder move; and the same done in Finder. Specifically
+   establish:
+   - whether a rename made on device A arrives on device B as a rename or as
+     delete-then-create, and how far apart the note and PDF arrive;
+   - whether anything dependable distinguishes a local change from a
+     sync-delivered one;
+   - what a not-yet-downloaded iCloud PDF looks like to the plugin.
+   The results set the settle and grace durations and decide the "local
+   intent" rule.
 
 ## Risks
 
-- **Multi-device sync races.** When a pair is renamed on device A, device B
-  may receive the note's rename before the PDF's. The plugin on B could rename
-  the PDF itself just before sync does. Idempotent reconciliation and the
-  settle delay are the mitigation; the result with the owner's sync tool is
-  unverified and must be tested (spike 2). Which sync the owner uses is not
-  known.
-- **Delete ambiguity** (above). The grace period and trash-only rule are the
-  mitigation.
+- **Sync races.** A rename on device A can reach device B note-first, with the
+  larger PDF seconds or minutes behind (iCloud especially). If B's plugin
+  renames the PDF before sync delivers it, the likely result is a duplicate or
+  conflict copy. Mitigated by Sync safety; residual risk remains until spike 2
+  has been run on both sync systems.
+- **A rename that arrives as delete-then-create with a slow create** could
+  outlast the delete grace period, trashing the PDF on B, and that deletion
+  would then sync back to A. The PDF is recoverable from trash, and the
+  setting can disable delete-following. If spike 2 shows this pattern, the
+  builder should make "leave the PDF" the default and raise it with the owner.
 - **Explorer hiding** may regress with Obsidian updates. Accepted: it fails to
   "two rows visible".
 
@@ -315,7 +358,7 @@ These are throwaway and gate decisions in the plan.
 - Module layout beyond "testable core, thin Obsidian layer, minimal `main.ts`".
 - Exact settle and grace durations (informed by spike 2).
 - The form of the Needs attention UI (modal or sidebar view) and of the
-  wrapper marker.
+  visual marker on wrapper notes.
 - How copies are numbered when `Statement 1` exists.
 - Version number for the release.
 - Order of work, provided the settings fix and test setup come first and the
