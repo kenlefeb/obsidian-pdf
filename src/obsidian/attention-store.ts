@@ -1,6 +1,6 @@
 import { Notice, type App } from "obsidian";
 import type PdfWrapperPlugin from "../main.ts";
-import { bulkResultMessage, nextPendingRemoved } from "../core/attention.ts";
+import { bulkResultMessage, nextPendingRemoved, noteBesidePdf, noteBesidePdfMessage } from "../core/attention.ts";
 import { classify } from "../core/classify.ts";
 import { buildAttention, fixesFor, isBulkFixable, isCurrent, planFix } from "../core/fixes.ts";
 import { specificAttachmentFolder } from "../core/settings-data.ts";
@@ -34,7 +34,9 @@ export class AttentionStore {
 	private bulk = { fix: 0, wrap: 0 };
 	private chain: Promise<unknown> = Promise.resolve();
 	private readonly listeners = new Set<() => void>();
+	private readonly openModals = new Set<{ close(): void }>();
 	private followUpTimer: number | null = null;
+	private scanned = false;
 	private unloaded = false;
 
 	constructor(
@@ -46,12 +48,30 @@ export class AttentionStore {
 			this.unloaded = true;
 			this.listeners.clear();
 			this.cancelFollowUp();
+			// No button of an unloaded plugin may stay clickable.
+			for (const modal of [...this.openModals]) modal.close();
+			this.openModals.clear();
 		});
+	}
+
+	/** Registers a modal to close when the plugin unloads. Call the returned function when it closes. */
+	trackModal(modal: { close(): void }): () => void {
+		if (this.unloaded) {
+			modal.close();
+			return () => undefined;
+		}
+		this.openModals.add(modal);
+		return () => this.openModals.delete(modal);
+	}
+
+	/** False until the first scan has completed. */
+	hasScanned(): boolean {
+		return this.scanned;
 	}
 
 	/** Rescans, adding `pendingRemoved` to the PDFs whose note was removed outside Obsidian. Never changes a vault file. */
 	refresh(pendingRemoved?: string[]): Promise<AttentionItem[]> {
-		return this.serial(() => this.rescan(pendingRemoved ?? []));
+		return this.serial(() => this.rescan(pendingRemoved ?? []), () => this.items());
 	}
 
 	items(): AttentionItem[] {
@@ -73,6 +93,17 @@ export class AttentionStore {
 			try {
 				if (fix === "keep-plain" && item.kind === "note-removed" && item.pdfPath !== null) {
 					await this.forgetPending(item.pdfPath);
+					if (this.unloaded) return;
+				}
+				if (fix === "delete-pdf" && item.pdfPath !== null) {
+					// The metadata cache (and so `planFix`) can lag a note that has just come back, for example
+					// by sync; the vault's file list does not. Never trash a PDF whose note is there.
+					const note = noteBesidePdf(item.pdfPath, this.plugin.app.vault.getFiles().map((f) => f.path));
+					if (note !== null) {
+						new Notice(noteBesidePdfMessage(note));
+						await this.rescan([]);
+						return;
+					}
 				}
 				const actions = planFix(item, fix, this.snapshot(), chosenPdf);
 				ranActions = actions.some((a) => a.type !== "notice");
@@ -83,7 +114,7 @@ export class AttentionStore {
 			}
 			await this.rescan([]);
 			if (ranActions) this.scheduleFollowUp();
-		});
+		}, () => undefined);
 	}
 
 	/** Applies the default fix to every entry "Fix all" covers. Resolves to the number fixed. */
@@ -111,29 +142,39 @@ export class AttentionStore {
 		return this.serial(async () => {
 			let done = 0;
 			let stopped = false;
-			for (const item of [...this.list]) {
-				if (this.unloaded) break;
-				const snapshot = this.snapshot();
-				const fix = pick(item, snapshot);
-				if (fix === null) continue;
-				try {
-					if (await this.executor.run(planFix(item, fix, snapshot))) done++;
-				} catch (error) {
-					// The Executor has already shown a notice naming the file and the reason.
-					console.error("PDF Wrapper: bulk fix failed", item, fix, error);
-					stopped = true;
-					break;
+			try {
+				for (const item of [...this.list]) {
+					if (this.unloaded) break;
+					const snapshot = this.snapshot();
+					const fix = pick(item, snapshot);
+					if (fix === null) continue;
+					try {
+						// False means a file vanished under us: that item is skipped, not counted, and the run goes on.
+						// Only a throw is a failure that stops the run.
+						if (await this.executor.run(planFix(item, fix, snapshot))) done++;
+					} catch (error) {
+						// The Executor has already shown a notice naming the file and the reason.
+						console.error("PDF Wrapper: bulk fix failed", item, fix, error);
+						stopped = true;
+						break;
+					}
 				}
+			} catch (error) {
+				// Something other than a file action failed, for example reading the vault.
+				console.error("PDF Wrapper: bulk fix failed", error);
+				stopped = true;
+			} finally {
+				if (!this.unloaded) new Notice(bulkResultMessage(kind, done, stopped));
+				await this.rescan([]);
+				if (done > 0) this.scheduleFollowUp();
 			}
-			if (!this.unloaded) new Notice(bulkResultMessage(kind, done, stopped));
-			await this.rescan([]);
-			if (done > 0) this.scheduleFollowUp();
 			return done;
-		});
+		}, () => 0);
 	}
 
-	private serial<T>(task: () => Promise<T>): Promise<T> {
-		const run = this.chain.then(task);
+	/** Runs `task` after every earlier one has settled; once the plugin has unloaded, returns `ifUnloaded()` instead. */
+	private serial<T>(task: () => Promise<T>, ifUnloaded: () => T): Promise<T> {
+		const run = this.chain.then(() => (this.unloaded ? ifUnloaded() : task()));
 		this.chain = run.catch(() => undefined);
 		return run;
 	}
@@ -153,12 +194,14 @@ export class AttentionStore {
 			if (!sameList(pending, settings.pendingRemovedPdfs)) {
 				settings.pendingRemovedPdfs = pending;
 				await this.plugin.saveSettings();
+				if (this.unloaded) return this.items();
 			}
 			this.current = c;
 			this.list = buildAttention(c, pending, {
 				includeUnwrapped: this.isAutoWrapOn(),
 				attachmentFolder: attachmentFolder(this.plugin.app),
 			});
+			this.scanned = true;
 			this.bulk = {
 				fix: this.list.filter((item) => isBulkFixable(item, snapshot)).length,
 				wrap: this.list.filter((item) => item.kind === "unwrapped").length,

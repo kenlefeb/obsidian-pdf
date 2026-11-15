@@ -113,3 +113,7 @@ opens the list as last checked.
 - [ ] "Fix all" with nothing blocking: "Fixed <n> documents." and every misnamed or displaced entry with a single claimant is gone. Neither "Fix all" nor "Wrap all" appears when it would do nothing.
 - [ ] With nothing broken, the list says "Everything is in order." and no startup notice appears.
 - [ ] On a phone: the list opens from the command palette, long names wrap instead of overflowing, every button is easy to tap (at least 44px tall), and each fix works.
+- [ ] Open the list, then disable PDF Wrapper in Settings → Community plugins: the list closes (and so does an open "Delete the PDF?" confirmation or PDF chooser). Repeat, clicking a fix (or confirming "Delete the PDF") just before disabling: no file changes after the plugin is disabled.
+- [ ] Delete a wrapped note in Finder with Obsidian open, wait for its "note removed" entry, then copy the note back in Finder: on the next check the entry clears. Clicking "Delete the PDF" (and confirming) before it clears is refused with "A note named <note> now exists beside this PDF. Check the list again." and the PDF stays.
+- [ ] Run "Show documents needing attention" straight after launch, before the startup check has run: the list says "Checking…" and then fills in.
+- [ ] A Missing entry with no candidates shows "No candidate PDFs found" as a line in the row (as well as on the disabled button's tooltip on desktop).

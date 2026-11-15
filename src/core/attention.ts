@@ -1,4 +1,4 @@
-import { dirname, filename } from "./paths.ts";
+import { basename, dirname, filename, findPathIgnoringCase, isNote, joinPath } from "./paths.ts";
 import type { AttentionItem, Classification, FixId } from "./types.ts";
 
 /** A folder for display: the vault root shows as "/". */
@@ -69,4 +69,19 @@ export function bulkResultMessage(kind: "fix" | "wrap", done: number, stopped: b
 /** The startup notice when the list is not empty. */
 export function attentionNotice(count: number): string {
 	return count === 1 ? "1 wrapped document needs attention" : `${count} wrapped documents need attention`;
+}
+
+/**
+ * The note in `notePaths` that would pair with `pdfPath` (same folder, same base name, ignoring letter case as a
+ * case-insensitive file system would), or null. Meant for the vault's file list, which does not lag as the
+ * metadata cache can.
+ */
+export function noteBesidePdf(pdfPath: string, notePaths: string[]): string | null {
+	const wanted = joinPath(dirname(pdfPath), `${basename(pdfPath)}.md`);
+	return findPathIgnoringCase(notePaths.filter(isNote), wanted);
+}
+
+/** Why "Delete the PDF" was refused: a note that would pair with it exists. */
+export function noteBesidePdfMessage(notePath: string): string {
+	return `A note named ${filename(notePath)} now exists beside this PDF. Check the list again.`;
 }

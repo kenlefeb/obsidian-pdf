@@ -1,5 +1,5 @@
 import { expect, test } from 'vitest';
-import { attentionNotice, bulkResultMessage, fixLabel, nextPendingRemoved, rowFile, stateLine } from '../../src/core/attention.ts';
+import { attentionNotice, bulkResultMessage, fixLabel, noteBesidePdf, noteBesidePdfMessage, nextPendingRemoved, rowFile, stateLine } from '../../src/core/attention.ts';
 import { classify } from '../../src/core/classify.ts';
 import type { AttentionItem, AttentionKind, Classification, FixId, NoteClaim } from '../../src/core/types.ts';
 
@@ -84,4 +84,20 @@ test('bulkResultMessage reports how many were done, and says so when it stopped 
 test('attentionNotice says how many wrapped documents need attention', () => {
 	expect(attentionNotice(3)).toBe('3 wrapped documents need attention');
 	expect(attentionNotice(1)).toBe('1 wrapped document needs attention');
+});
+
+// noteBesidePdf
+test('noteBesidePdf finds the note that would pair with the PDF, ignoring letter case', () => {
+	expect(noteBesidePdf('a/S.pdf', ['a/T.md', 'a/S.md'])).toBe('a/S.md');
+	expect(noteBesidePdf('a/S.pdf', ['A/s.MD'])).toBe('A/s.MD');
+	expect(noteBesidePdf('S.pdf', ['s.md'])).toBe('s.md');
+});
+
+test('noteBesidePdf ignores notes in other folders, with other names, and non-notes', () => {
+	expect(noteBesidePdf('a/S.pdf', ['b/S.md', 'a/S 1.md', 'a/S.canvas', 'a/S.pdf'])).toBeNull();
+	expect(noteBesidePdf('a/S.pdf', [])).toBeNull();
+});
+
+test('noteBesidePdfMessage names the note file', () => {
+	expect(noteBesidePdfMessage('a/S.md')).toBe('A note named S.md now exists beside this PDF. Check the list again.');
 });

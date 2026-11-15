@@ -46,3 +46,8 @@
 .pdf-wrapper-mobile button {
 	min-height: 44px;
 }
+
+.pdf-wrapper-attention-hint {
+	color: var(--text-faint);
+	font-size: var(--font-ui-smaller);
+}
