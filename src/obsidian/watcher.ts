@@ -28,8 +28,11 @@ export interface WatcherDeps {
 	getSettings: () => PdfWrapperSettings;
 	/** Called once per settle window, with every PDF whose note was removed outside Obsidian in it (often none). */
 	onRecheck: (pendingRemoved: string[]) => void;
-	/** Called for every PDF that appears and is not the plugin's own change; the receiver decides whether to act. */
-	onPdfCreated: (path: string) => void;
+	/**
+	 * Called for every PDF that appears and is not the plugin's own change; the receiver decides whether to act.
+	 * `local` is true when the plugin positively identified it as made by an action inside Obsidian on this device.
+	 */
+	onPdfCreated: (path: string, local: boolean) => void;
 }
 
 const reason = (error: unknown): string => (error instanceof Error ? error.message : String(error));
@@ -75,6 +78,8 @@ export class Watcher {
 	private onRename(file: TAbstractFile, oldPath: string): void {
 		// A folder's children fire their own renames.
 		if (!(file instanceof TFile) || this.isOwn(oldPath)) return;
+		// A PDF that reaches its final name from a non-PDF one (a download's temporary name) is an arrival from outside.
+		if (isPdf(file.path) && !isPdf(oldPath)) this.deps.onPdfCreated(file.path, false);
 		const local = this.deps.localIntent.consume(oldPath) && this.deps.getSettings().followRenames;
 		this.enqueue({ kind: "rename", path: file.path, oldPath, local });
 	}
@@ -82,7 +87,7 @@ export class Watcher {
 	private onCreate(file: TAbstractFile): void {
 		if (!(file instanceof TFile) || this.isOwn(file.path)) return;
 		const local = this.deps.localIntent.consume(file.path);
-		if (isPdf(file.path)) this.deps.onPdfCreated(file.path);
+		if (isPdf(file.path)) this.deps.onPdfCreated(file.path, local);
 		this.enqueue({ kind: "create", path: file.path, local });
 	}
 

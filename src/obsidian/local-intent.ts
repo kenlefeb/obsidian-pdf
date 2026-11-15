@@ -1,4 +1,4 @@
-import { TFolder, type App, type FileManager, type TAbstractFile, type Vault } from "obsidian";
+import { TFolder, type App, type DataWriteOptions, type FileManager, type TAbstractFile, type Vault } from "obsidian";
 import { around } from "monkey-around";
 import { IntentMarks } from "../core/marks.ts";
 
@@ -18,7 +18,7 @@ export class LocalIntent {
 
 	constructor(private readonly app: App) {}
 
-	/** Wraps `Vault.rename`, `Vault.trash`, `Vault.delete` and `FileManager.renameFile`. Returns the uninstaller. */
+	/** Wraps `Vault.rename`, `trash`, `delete`, `create`, `createBinary`, `copy` and `FileManager.renameFile`. Returns the uninstaller. */
 	install(): () => void {
 		/** Runs `run`, counting it as in flight until it settles. */
 		const follow = <T>(run: () => Promise<T>): Promise<T> => {
@@ -29,9 +29,12 @@ export class LocalIntent {
 			return pending;
 		};
 
-		const track = <T>(file: TAbstractFile, run: () => Promise<T>): Promise<T> => {
+		const track = <T>(file: TAbstractFile, run: () => Promise<T>): Promise<T> =>
+			trackPath(file.path, file instanceof TFolder, run);
+
+		const trackPath = <T>(path: string, isFolder: boolean, run: () => Promise<T>): Promise<T> => {
 			// If the call fails, the change did not happen, so the path is not being changed locally.
-			const unmark = this.marks.mark(file.path, file instanceof TFolder);
+			const unmark = this.marks.mark(path, isFolder);
 			let pending: Promise<T>;
 			try {
 				pending = follow(run);
@@ -49,6 +52,23 @@ export class LocalIntent {
 		// through `app.vault` and `app.fileManager`, and an own property on the instance shadows
 		// the prototype for every caller without altering the class for anything else.
 		const unwrapVault = around(this.app.vault, {
+			// The destination path is marked, so a file made inside Obsidian (a drop, a paste, a copy) reads as local
+			// when its `create` event arrives. Rename and delete marks are by path too, so these do not affect them.
+			create(next) {
+				return function (this: Vault, path: string, data: string, options?: DataWriteOptions) {
+					return trackPath(path, false, () => next.call(this, path, data, options));
+				};
+			},
+			createBinary(next) {
+				return function (this: Vault, path: string, data: ArrayBuffer, options?: DataWriteOptions) {
+					return trackPath(path, false, () => next.call(this, path, data, options));
+				};
+			},
+			copy(next) {
+				return function <T extends TAbstractFile>(this: Vault, file: T, newPath: string) {
+					return trackPath(newPath, file instanceof TFolder, () => next.call(this, file, newPath)) as Promise<T>;
+				};
+			},
 			rename(next) {
 				return function (this: Vault, file: TAbstractFile, newPath: string) {
 					return track(file, () => next.call(this, file, newPath));

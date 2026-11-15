@@ -20,7 +20,8 @@ export class WrapMessage extends Error {
 
 /** A wrap that was refused before a note was created. (The template may have been created or repaired.) */
 export class WrapRefusal extends WrapMessage {
-	constructor(message: string) {
+	/** `note-exists`: a note already sits beside the PDF. */
+	constructor(message: string, readonly reason: "note-exists" | "other" = "other") {
 		super(message);
 		this.name = "WrapRefusal";
 	}
@@ -94,7 +95,7 @@ async function wrapOnce(
 	const notePath = siblingNotePath(pdfFile);
 	const occupied = existingSiblingNote(app, pdfFile);
 	if (occupied) {
-		throw new WrapRefusal(`Cannot wrap ${pdfFile.name}: a note already exists at ${occupied}.`);
+		throw new WrapRefusal(`Cannot wrap ${pdfFile.name}: a note already exists at ${occupied}.`, "note-exists");
 	}
 
 	const templateFile = await prepareTemplate(app, settings, saveSettings);

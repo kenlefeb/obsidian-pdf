@@ -23,8 +23,8 @@ export class Executor {
 	 * Runs the actions one after another. Resolves true when every action ran, false when it stopped
 	 * quietly because a file an action needs is no longer there (the vault changed under us; recheck).
 	 * On a failure it stops, shows a Notice naming the file and the reason, and rethrows.
-	 * With `quiet` a `wrap` action shows no Notice of its own: its failure, and a WrapIncomplete (the PDF
-	 * is wrapped but a later step failed), are thrown for the caller to report.
+	 * With `quiet`, a `wrap` action (and only that) shows no Notice of its own: its failure, and a WrapIncomplete
+	 * (the PDF is wrapped but a later step failed), are thrown for the caller to report.
 	 */
 	async run(actions: Action[], options: { quiet?: boolean } = {}): Promise<boolean> {
 		const quiet = options.quiet === true;
@@ -33,7 +33,7 @@ export class Executor {
 			try {
 				outcome = await this.runOne(action, quiet);
 			} catch (error) {
-				if (!quiet) new Notice(this.failureMessage(action, error));
+				if (!(quiet && action.type === "wrap")) new Notice(this.failureMessage(action, error));
 				throw error;
 			}
 			if (outcome === "stale") return false;

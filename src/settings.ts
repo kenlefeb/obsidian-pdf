@@ -46,7 +46,7 @@ export class PdfWrapperSettingTab extends PluginSettingTab {
 			// eslint-disable-next-line obsidianmd/ui/sentence-case -- "PDFs" is an acronym plural; the text is the spec's wording.
 			.setName('Wrap new PDFs automatically')
 			// eslint-disable-next-line obsidianmd/ui/sentence-case -- as above.
-			.setDesc('Applies to this device only. PDFs that arrive while Obsidian is closed are listed for you to wrap.')
+			.setDesc('Applies to this device only. A PDF added inside Obsidian is wrapped after a couple of seconds; one that arrives from outside, such as from sync or another app, waits up to half a minute so that two devices do not both wrap it. PDFs that arrive while Obsidian is closed are listed for you to wrap.')
 			.addToggle(toggle => toggle
 				.setValue(isAutoWrapOn(this.app))
 				.onChange((value) => {

@@ -123,15 +123,18 @@ opens the list as last checked.
 The switch is Settings → PDF Wrapper → "Wrap new PDFs automatically". It is stored on the device, not synced.
 None of this has been run in Obsidian yet.
 
-- [ ] Toggle on; drop a PDF into the file explorer: it is wrapped within a few seconds (after about two), a notice "Wrapped <name>" appears and the new note is not opened.
-- [ ] Save a PDF into the vault folder from Finder while Obsidian is running: it is wrapped.
+- [ ] Toggle on; drop a PDF into the file explorer: it is wrapped in about 2 seconds, a notice "Wrapped <name>" appears and the new note is not opened. Time it. (Unverified: that Obsidian's own drag and drop goes through `Vault.create`, `createBinary` or `copy`, which is what makes it count as local. If it takes 15-30 s, it does not.)
+- [ ] Save a PDF into the vault folder from Finder while Obsidian is running: it is wrapped in 15-30 seconds. Time it, three times; the delay varies.
+- [ ] Download a PDF from a browser straight into the vault folder: it is wrapped once the download finishes and the file gets its final name (15-30 s later), not while it is still a temporary name.
 - [ ] Paste a PDF into another note with a specific "Default location for new attachments" folder set: the PDF lands in that folder and is not wrapped.
-- [ ] Drop 20 PDFs at once (a folder dragged in): each gets exactly one note, no PDF is skipped, and no note is created twice. Note how long the last one took.
+- [ ] Drop 20 PDFs at once (a folder dragged in): each gets exactly one note, no PDF is skipped, and no note is created twice. Note how long the last one took. The notices are one "Wrapped 20 PDFs." at the end of the pass (not 20), and with 1 to 3 PDFs one "Wrapped <name>" each.
 - [ ] With the template path empty or pointing at a missing file, drop several PDFs: they are still wrapped (the template is created), with no failure notice.
-- [ ] Make wrapping fail for every PDF (for example a read-only folder), then drop 5 PDFs: the failure appears once, not five times, and not twice for one PDF.
+- [ ] Make wrapping fail for every PDF (for example a read-only folder), then drop 5 PDFs: one notice "Could not wrap 5 PDFs. First problem: ... The rest are listed under documents needing attention."; with a single PDF, its own message once. The PDFs are listed as Unwrapped.
+- [ ] Wrap with a template that makes the embed update fail (so the wrap is incomplete): the PDF is wrapped, one notice with the problem, and no "Wrapped <name>" for it.
+- [ ] Two devices on and a PDF arriving on both: the later device does not show a failure notice for the note that already exists (it silently skips).
 - [ ] Toggle off during the settle period (within two seconds of dropping a PDF): the PDF is not wrapped.
 - [ ] Disable the plugin within two seconds of dropping a PDF: nothing is wrapped afterwards.
-- [ ] With two devices both on, add a PDF on one: exactly one note results, on both devices. Record how long the second device waited before it saw the note (and whether it ever wrapped the PDF itself).
+- [ ] With two devices both on, add a PDF on one: exactly one note results, on both devices. Record how long the second device waited before it saw the note (and whether it ever wrapped the PDF itself). Repeat with the PDF saved into iCloud from a third app so both see it from outside at the same moment; repeat 5 times and count duplicate notes.
 - [ ] The toggle state differs per device: turn it on here, check another device still has it off.
 - [ ] A PDF added while Obsidian was closed appears as "Unwrapped" in the list with "Wrap all", and is not wrapped on its own at startup.
 - [ ] Toggle off: no "Unwrapped" entries are listed, and the list refreshes straight away when the switch is flipped.
@@ -145,3 +148,4 @@ None of this has been run in Obsidian yet.
 - [ ] With `S 1.md` present but no `S 1.pdf`, duplicate `S`: both copies are named `S 2`.
 - [ ] The menu item and command are absent for a note without the marker, with a missing PDF, or with a PDF elsewhere or under another name (the command is not listed in the palette; the file menu has no item).
 - [ ] Trigger the command twice quickly: only one copy pair is made.
+- [ ] Leave a Templater prompt open during an automatic wrap: after 60 seconds the console shows a "PDF Wrapper:" warning; the wrap is not abandoned and later PDFs wait.

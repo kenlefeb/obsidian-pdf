@@ -41,8 +41,8 @@ export default class PdfWrapperPlugin extends Plugin {
 			executor,
 			getSettings: () => this.settings,
 			onRecheck: (paths) => void store.refresh(paths),
-			onPdfCreated: (path) => {
-				if (isAutoWrapOn(this.app)) autoWrapper.onPdfCreated(path);
+			onPdfCreated: (path, local) => {
+				if (isAutoWrapOn(this.app)) autoWrapper.onPdfCreated(path, local);
 			},
 		});
 		watcher.start();
