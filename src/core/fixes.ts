@@ -1,3 +1,4 @@
+import { classify } from "./classify.ts";
 import { basename, dirname, filename, isInFolder, joinPath } from "./paths.ts";
 import type { Action, AttentionItem, AttentionKind, Classification, FixId, Snapshot } from "./types.ts";
 
@@ -48,9 +49,13 @@ export function candidatesForMissing(item: AttentionItem, c: Classification): st
 	const folder = dirname(item.notePath);
 	const names = new Set([basename(item.notePath)]);
 	if (item.rawTarget !== null) names.add(basename(item.rawTarget));
+	const exactFirst = (paths: string[]) => [
+		...paths.filter((p) => basename(p) === basename(item.notePath ?? "")),
+		...paths.filter((p) => basename(p) !== basename(item.notePath ?? "")),
+	];
 	const beside = c.unwrappedPdfs.filter((p) => dirname(p) === folder);
 	const elsewhere = c.unwrappedPdfs.filter((p) => dirname(p) !== folder && names.has(basename(p)));
-	return [...beside, ...elsewhere];
+	return [...exactFirst(beside), ...exactFirst(elsewhere)];
 }
 
 /** The extension of the file's own name, case preserved, with the dot; empty when none. */
@@ -70,8 +75,27 @@ function isTaken(path: string, snapshot: Snapshot, self: string | null): boolean
 	return snapshot.pdfPaths.some(clash) || snapshot.notePaths.some(clash);
 }
 
-function oldTargetsOf(pdfPath: string): string[] {
-	return [pdfPath, filename(pdfPath), basename(pdfPath)];
+function namesOf(path: string): string[] {
+	return [path, filename(path), basename(path)];
+}
+
+/** What embeds in the note may currently point at: the PDF's previous path (when it moves or is copied) and the note's raw target. */
+function oldTargetsOf(item: AttentionItem, movedFrom: string | null): string[] {
+	const names = [...(movedFrom === null ? [] : namesOf(movedFrom)), ...(item.rawTarget === null ? [] : namesOf(item.rawTarget))];
+	return [...new Set(names)];
+}
+
+const STALE: Action[] = [{ type: "notice", message: "This has changed since it was listed. Check the list again." }];
+
+/** True when the item still describes the vault: its pair is in the same state with the same PDF, or its PDF is still unclaimed. */
+export function isCurrent(item: AttentionItem, snapshot: Snapshot): boolean {
+	const c = classify(snapshot);
+	if (item.kind === "note-removed" || item.kind === "unwrapped") {
+		return item.pdfPath !== null && c.unwrappedPdfs.includes(item.pdfPath);
+	}
+	if (item.notePath === null) return false;
+	const pair = c.pairs.find((p) => p.notePath === item.notePath);
+	return pair !== undefined && pair.state === item.kind && pair.pdfPath === item.pdfPath;
 }
 
 function need(value: string | null | undefined, what: string, fix: FixId): string {
@@ -85,6 +109,7 @@ function taken(verb: string, from: string, to: string): Action[] {
 
 /** The file actions a fix performs. Never overwrites: a taken destination yields a single notice. */
 export function planFix(item: AttentionItem, fix: FixId, snapshot: Snapshot, chosenPdf?: string): Action[] {
+	if (!fixesFor(item.kind).includes(fix) || !isCurrent(item, snapshot)) return STALE;
 	switch (fix) {
 		case "keep-plain":
 			return [];
@@ -102,7 +127,7 @@ export function planFix(item: AttentionItem, fix: FixId, snapshot: Snapshot, cho
 			if (isTaken(to, snapshot, from)) return taken(fix === "move-pdf-to-note" ? "move" : "rename", from, to);
 			return [
 				{ type: "rename", from, to },
-				{ type: "setClaim", notePath, pdfPath: to, oldTargets: oldTargetsOf(from) },
+				{ type: "setClaim", notePath, pdfPath: to, oldTargets: oldTargetsOf(item, from) },
 			];
 		}
 		case "rename-note-to-pdf": {
@@ -112,7 +137,7 @@ export function planFix(item: AttentionItem, fix: FixId, snapshot: Snapshot, cho
 			if (isTaken(to, snapshot, from)) return taken("rename", from, to);
 			return [
 				{ type: "rename", from, to },
-				{ type: "setClaim", notePath: to, pdfPath, oldTargets: [] },
+				{ type: "setClaim", notePath: to, pdfPath, oldTargets: oldTargetsOf(item, null) },
 			];
 		}
 		case "copy-pdf-for-note": {
@@ -122,18 +147,21 @@ export function planFix(item: AttentionItem, fix: FixId, snapshot: Snapshot, cho
 			if (isTaken(to, snapshot, null)) return taken("copy", from, to);
 			return [
 				{ type: "copy", from, to },
-				{ type: "setClaim", notePath, pdfPath: to, oldTargets: oldTargetsOf(from) },
+				{ type: "setClaim", notePath, pdfPath: to, oldTargets: oldTargetsOf(item, from) },
 			];
 		}
 		case "choose-pdf": {
 			const notePath = need(item.notePath, "a note", fix);
 			const from = need(chosenPdf, "a chosen PDF", fix);
+			if (!classify(snapshot).unwrappedPdfs.includes(from)) {
+				return [{ type: "notice", message: `${from} is no longer available. Pick again.` }];
+			}
 			const to = partnerDestination(notePath, from);
-			if (to === from) return [{ type: "setClaim", notePath, pdfPath: to, oldTargets: [] }];
+			if (to === from) return [{ type: "setClaim", notePath, pdfPath: to, oldTargets: oldTargetsOf(item, null) }];
 			if (isTaken(to, snapshot, from)) return taken("move", from, to);
 			return [
 				{ type: "rename", from, to },
-				{ type: "setClaim", notePath, pdfPath: to, oldTargets: oldTargetsOf(from) },
+				{ type: "setClaim", notePath, pdfPath: to, oldTargets: oldTargetsOf(item, from) },
 			];
 		}
 	}
@@ -142,8 +170,9 @@ export function planFix(item: AttentionItem, fix: FixId, snapshot: Snapshot, cho
 /** True when the default fix can be applied in a batch: a lone claim, a free destination, no copying. */
 export function isBulkFixable(item: AttentionItem, snapshot: Snapshot): boolean {
 	if ((item.kind !== "misnamed" && item.kind !== "displaced") || item.notePath === null || item.pdfPath === null) return false;
+	if (!isCurrent(item, snapshot)) return false;
 	const claims = snapshot.claims.filter((claim) => claim.pdfPath === item.pdfPath);
-	if (claims.length !== 1) return false;
+	if (claims.length !== 1 || claims[0]?.notePath !== item.notePath) return false;
 	return !isTaken(partnerDestination(item.notePath, item.pdfPath), snapshot, item.pdfPath);
 }
 
