@@ -59,12 +59,31 @@ export function planAutoWrap(
 	return plan;
 }
 
-/** What became of one automatic wrap. `skipped` is a benign race (a note appeared at the last moment) and is silent. */
+/**
+ * What became of one automatic wrap. `skipped` is a benign race (a note appeared at the last moment) and is silent.
+ * `template-failed`: Templater left no note (its template failed or its prompt was cancelled); see `pausesAutoWrap`.
+ */
 export type WrapOutcome =
 	| { kind: "wrapped"; name: string }
 	| { kind: "incomplete"; name: string; message: string }
 	| { kind: "failed"; message: string }
+	| { kind: "template-failed"; message: string }
 	| { kind: "skipped" };
+
+/**
+ * True when automatic wrapping should pause after this outcome: the template would most likely fail the same way for
+ * every PDF waiting, each time with Templater's own error. The pass stops, and the PDFs waiting then are not tried again
+ * until a later wrap succeeds.
+ */
+export function pausesAutoWrap(outcome: WrapOutcome): boolean {
+	return outcome.kind === "template-failed";
+}
+
+/** The notice for a pass that paused on `message` (which says what failed). */
+export function pausedMessage(message: string): string {
+	const trimmed = message.trim().replace(/\.+$/, "");
+	return `Automatic wrapping paused: ${trimmed}. PDFs that are not wrapped are listed under documents needing attention.`;
+}
 
 const MAX_NAMED_WRAPS = 3;
 
@@ -93,6 +112,8 @@ export function summarizeWraps(outcomes: WrapOutcome[]): string[] {
 			? firstFailure.message
 			: `Could not wrap ${failed.length} PDFs. First problem: ${firstFailure.message} The rest are listed under documents needing attention.`);
 	}
+	const paused = outcomes.find((o): o is Extract<WrapOutcome, { kind: "template-failed" }> => o.kind === "template-failed");
+	if (paused) notices.push(pausedMessage(paused.message));
 	return notices;
 }
 
