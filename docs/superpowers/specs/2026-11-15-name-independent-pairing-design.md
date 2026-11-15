@@ -77,7 +77,7 @@ Everything below marked *(call)* is the designer's decision.
 
 **Marked note.** A note whose frontmatter has the marker property (name from
 settings, default `wrapped-pdf`) with any value other than `false`, empty or
-null. The plugin writes `true`. An old-format value (a link) still counts as
+null. The plugin writes `true`. A link value (the earlier format) still counts as
 marked. *(call)*
 
 **Wrapped document (healthy pair).** A marked note and a PDF with the same
@@ -97,7 +97,7 @@ The earlier advice that a template may list the PDF under `attachments` is
 withdrawn: the `wrapped-pdf` flag says the same thing without a link.
 
 **Unwrapped PDF.** A PDF with no marked note of its name beside it, and which
-no old-format note's marker link points to. A link-valued marker still protects
+no marked note's link-valued marker points to. A link-valued marker still protects
 its PDF until the note is converted: that PDF is not listed as Not wrapped, not
 offered to other notes, and not wrapped automatically. *(call)*
 
