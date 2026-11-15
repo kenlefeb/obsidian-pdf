@@ -129,8 +129,9 @@ Placeholders are resolved by Templater when it is installed. Otherwise the core 
 With Templater, the plugin uses only the note Templater hands back, or a note at the expected place beside the PDF. If Templater hands back no note and there is none beside the PDF, the plugin does not look for it or move anything:
 
 - If no new note appeared while Templater ran (expected when the template's code fails or you cancel one of its prompts; Templater shows its own message), it says "Templater did not create a note for <PDF name>. Check its own message, fix the template or answer its prompt, then wrap again." The PDF stays unwrapped.
-- If notes appeared while Templater ran (the template may have renamed or moved its note, or something else created notes meanwhile, such as sync), it names up to three of them and leaves them to you: "Templater did not return a note for <PDF name>. Notes created while it ran: <paths>. If one of them is its note, move it beside <PDF name> and add the "<marker>" property; otherwise wrap again." If Templater failed with an error, the message starts "Templater failed: <reason>." and says nothing was created.
+- If notes appeared while Templater ran (the template may have renamed or moved its note, or something else created notes meanwhile, such as sync), it names up to three of them and leaves them to you: "Templater did not return a note for <PDF name>. Notes created while it ran: <paths>. If one of them is its note, move it beside <PDF name> and add the "<marker>" property; otherwise wrap again." If Templater failed with an error, the message starts "Templater failed: <reason>." and says nothing was created beside the PDF.
 - If Templater failed with an error and no note appeared, the plugin creates the note without Templater, using the core Templates placeholders.
+- If a note turns up beside the PDF that was already there before Templater ran (for example delivered by sync while the wrap was starting), the plugin does not use it: the wrap is refused as for any existing note.
 
 A template that renames or moves its note and hands it back to the plugin is fine: the plugin moves that note back beside the PDF.
 
