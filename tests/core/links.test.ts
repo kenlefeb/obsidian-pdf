@@ -79,7 +79,11 @@ test('a 200 KB line of unclosed wikilinks is read quickly, and a real link after
 	expect(links(junk)).toBe(false);
 	expect(Date.now() - started).toBeLessThan(1000);
 });
-test('a markdown link target longer than 2048 characters is not a link', () => {
-	expect(links(`[x](${'d/'.repeat(1100)}A.pdf)`)).toBe(false);
+test('a markdown link target longer than 2048 characters counts as a link only if it holds the file name', () => {
 	expect(links(`[x](${'d/'.repeat(1000)}A.pdf)`)).toBe(true);
+	expect(links(`[x](${'d/'.repeat(1100)}A.pdf)`)).toBe(true);
+	expect(links(`[x](${'d/'.repeat(1100)}a.PDF#page=2)`)).toBe(true);
+	expect(links(`[x](${'d/'.repeat(1100)}A%20B.pdf)`, 'A B.pdf')).toBe(true);
+	expect(links(`[x](${'d/'.repeat(1100)}B.pdf)`)).toBe(false);
+	expect(links(`[x](<${'d/'.repeat(1100)}A.pdf>)`)).toBe(true);
 });

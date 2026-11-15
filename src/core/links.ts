@@ -1,6 +1,9 @@
 import { basename, filename } from "./paths.ts";
 
-/** A markdown link target longer than this is not taken as a link. */
+/**
+ * A markdown link target longer than this is not parsed (a bound on the work per link). Such a link still counts as
+ * a link to the PDF when its line holds the PDF's file name, so the bound never leans towards deleting.
+ */
 const MAX_TARGET = 2048;
 
 /**
@@ -22,8 +25,16 @@ export function textLinksToPdf(text: string, pdfPath: string): boolean {
 	for (const inner of wikilinkInners(text)) {
 		if (matches(wikilinkTarget(inner))) return true;
 	}
-	for (const inner of markdownLinkTargets(text)) {
+	const { targets, overlongLines } = markdownLinkTargets(text);
+	for (const inner of targets) {
 		if (matches(markdownTarget(inner))) return true;
+	}
+	if (overlongLines.length > 0) {
+		const forms = nameForms(filename(pdfPath));
+		for (const line of overlongLines) {
+			const lower = line.toLowerCase();
+			if (forms.some((form) => lower.includes(form))) return true;
+		}
 	}
 	return false;
 }
@@ -32,6 +43,12 @@ export function textLinksToPdf(text: string, pdfPath: string): boolean {
 function wikilinkTarget(inner: string): string {
 	const target = inner.split("|")[0]?.split("#")[0] ?? "";
 	return target.endsWith("\\") ? target.slice(0, -1) : target;
+}
+
+/** The PDF's file name, lower-cased, as written and percent-encoded. */
+function nameForms(name: string): string[] {
+	const forms = [name, encodeURI(name), encodeURIComponent(name)].map((form) => form.toLowerCase());
+	return [...new Set(forms)];
 }
 
 /**
@@ -62,22 +79,27 @@ function wikilinkInners(text: string): string[] {
 /**
  * The raw targets of the markdown links and embeds in `text`: what follows each `](` that has a `[` before it on the
  * same line (so link text may hold brackets), up to the `)` that closes the `(` (parentheses inside the target may
- * nest), or, for the `<…>` form, up to and including the `>`. A target is not followed past the end of its line, and
- * one longer than MAX_TARGET is not taken. Linear in the length of the text: each line's parentheses are matched once.
+ * nest), or, for the `<…>` form, up to and including the `>`. A target is not followed past the end of its line. A
+ * target longer than MAX_TARGET is not taken; its line is listed in `overlongLines` instead. Linear in the length of
+ * the text: each line's parentheses are matched once.
  */
-function markdownLinkTargets(text: string): string[] {
+function markdownLinkTargets(text: string): { targets: string[]; overlongLines: string[] } {
 	const targets: string[] = [];
+	const overlongLines: string[] = [];
 	let lineStart = 0;
 	while (lineStart <= text.length) {
 		const newline = text.indexOf("\n", lineStart);
 		const lineEnd = newline < 0 ? text.length : newline;
-		if (text.slice(lineStart, lineEnd).includes("](")) collectLineTargets(text, lineStart, lineEnd, targets);
+		if (text.slice(lineStart, lineEnd).includes("](") && collectLineTargets(text, lineStart, lineEnd, targets)) {
+			overlongLines.push(text.slice(lineStart, lineEnd));
+		}
 		lineStart = lineEnd + 1;
 	}
-	return targets;
+	return { targets, overlongLines };
 }
 
-function collectLineTargets(text: string, from: number, to: number, targets: string[]): void {
+/** Adds the line's targets to `targets`. True when the line has a target longer than MAX_TARGET. */
+function collectLineTargets(text: string, from: number, to: number, targets: string[]): boolean {
 	const size = to - from;
 	// For each "(" (by offset in the line), the offset of the ")" that closes it, or -1.
 	const closeOf = new Int32Array(size).fill(-1);
@@ -94,6 +116,7 @@ function collectLineTargets(text: string, from: number, to: number, targets: str
 	}
 	for (let k = size - 1; k >= 0; k--) nextGt[k] = text[from + k] === ">" ? k : (nextGt[k + 1] ?? -1);
 	let bracketSeen = false;
+	let overlong = false;
 	for (let k = 0; k < size - 1; k++) {
 		const ch = text[from + k];
 		if (ch === "[") {
@@ -101,9 +124,12 @@ function collectLineTargets(text: string, from: number, to: number, targets: str
 		} else if (ch === "]" && text[from + k + 1] === "(" && bracketSeen) {
 			const start = k + 2;
 			const end = text[from + start] === "<" ? (nextGt[start + 1] ?? -1) + 1 : (closeOf[k + 1] ?? -1);
-			if (end > 0 && end - start <= MAX_TARGET) targets.push(text.slice(from + start, from + end));
+			if (end <= 0) continue;
+			if (end - start <= MAX_TARGET) targets.push(text.slice(from + start, from + end));
+			else overlong = true;
 		}
 	}
+	return overlong;
 }
 
 /** `<folder/A B.pdf>`, `folder/A%20B.pdf#page=2 "title"` → `folder/A B.pdf`. */
