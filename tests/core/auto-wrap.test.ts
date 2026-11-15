@@ -5,6 +5,7 @@ import {
 	AUTO_WRAP_OUTSIDE_SETTLE_MS,
 	autoWrapDueAt,
 	planAutoWrap,
+	stoppedMessage,
 	summarizeWraps,
 	type WrapOutcome,
 } from '../../src/core/auto-wrap.ts';
@@ -116,4 +117,11 @@ test('successes, incomplete wraps and failures each get their own notice', () =>
 test('a skipped PDF is silent and not a failure', () => {
 	expect(summarizeWraps([{ kind: 'skipped' }])).toEqual([]);
 	expect(summarizeWraps([{ kind: 'skipped' }, ok('A'), bad('nope.')])).toEqual(['Wrapped A', 'nope.']);
+});
+
+test('the stopped notice has one full stop after the reason, whether or not the reason had one', () => {
+	const tail = 'Unwrapped PDFs are listed under documents needing attention.';
+	expect(stoppedMessage('disk full')).toBe(`Automatic wrapping stopped: disk full. ${tail}`);
+	expect(stoppedMessage('disk full.')).toBe(`Automatic wrapping stopped: disk full. ${tail}`);
+	expect(stoppedMessage('disk full. ')).toBe(`Automatic wrapping stopped: disk full. ${tail}`);
 });

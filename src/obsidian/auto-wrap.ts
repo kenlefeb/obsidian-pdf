@@ -1,5 +1,5 @@
 import { Notice, type App } from "obsidian";
-import { autoWrapDueAt, planAutoWrap, summarizeWraps, type ArrivalOrigin, type WrapOutcome } from "../core/auto-wrap.ts";
+import { autoWrapDueAt, planAutoWrap, stoppedMessage, summarizeWraps, type ArrivalOrigin, type WrapOutcome } from "../core/auto-wrap.ts";
 import type { PdfWrapperSettings } from "../core/settings-data.ts";
 import { WrapIncomplete, WrapMessage, WrapRefusal } from "../pdf-wrapper.ts";
 import type { Executor } from "./execute.ts";
@@ -118,7 +118,7 @@ export class AutoWrapper {
 		if (this.unloaded) return;
 		for (const message of summarizeWraps(outcomes)) new Notice(message);
 		if (stopped !== null) {
-			new Notice(`Automatic wrapping stopped: ${stopped}. Unwrapped PDFs are listed under documents needing attention.`);
+			new Notice(stoppedMessage(stopped));
 		}
 	}
 

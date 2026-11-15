@@ -134,7 +134,7 @@ None of this has been run in Obsidian yet.
 - [ ] Two devices on and a PDF arriving on both: the later device does not show a failure notice for the note that already exists (it silently skips).
 - [ ] Toggle off during the settle period (within two seconds of dropping a PDF): the PDF is not wrapped.
 - [ ] Disable the plugin within two seconds of dropping a PDF: nothing is wrapped afterwards.
-- [ ] With two devices both on, add a PDF on one: exactly one note results, on both devices. Record how long the second device waited before it saw the note (and whether it ever wrapped the PDF itself). Repeat with the PDF saved into iCloud from a third app so both see it from outside at the same moment; repeat 5 times and count duplicate notes.
+- [ ] With two devices both on, add a PDF on one: exactly one note results, on both devices. Record how long the second device waited before it wrapped. Expected: 15 to 30 seconds. A wait of about 2 seconds means sync delivered the PDF through a path the plugin reads as in-app, so the cross-device margin is gone: report it. Also note whether it ever wrapped the PDF itself. Repeat with the PDF saved into iCloud from a third app so both see it from outside at the same moment; repeat 5 times and count duplicate notes.
 - [ ] The toggle state differs per device: turn it on here, check another device still has it off.
 - [ ] A PDF added while Obsidian was closed appears as "Unwrapped" in the list with "Wrap all", and is not wrapped on its own at startup.
 - [ ] Toggle off: no "Unwrapped" entries are listed, and the list refreshes straight away when the switch is flipped.

@@ -66,7 +66,10 @@ export class LocalIntent {
 			},
 			copy(next) {
 				return function <T extends TAbstractFile>(this: Vault, file: T, newPath: string) {
-					return trackPath(newPath, file instanceof TFolder, () => next.call(this, file, newPath)) as Promise<T>;
+					// A folder mark is never used up and answers for every path inside for 5 s, so a sync or Finder delete
+					// there would read as local. A folder copy is therefore only followed (kept in flight), not marked.
+					if (file instanceof TFolder) return follow(() => next.call(this, file, newPath)) as Promise<T>;
+					return trackPath(newPath, false, () => next.call(this, file, newPath)) as Promise<T>;
 				};
 			},
 			rename(next) {

@@ -132,7 +132,8 @@ export class Watcher {
 		if (this.unloaded) return;
 		try {
 			// Let the user's own operation finish first (Obsidian rewrites links after Vault.rename returns).
-			// This cannot wait on itself: events run one at a time, so no Executor call is in flight here.
+			// Not an operation of this queue (events run one at a time), but automatic wrapping's Executor runs are not
+			// in this queue and can overlap with it; the wait is capped at IDLE_WAIT_MS so nothing can stall it for long.
 			await this.waitForIdle();
 			if (this.unloaded) return;
 			let snapshot = gatherSnapshot(this.plugin.app, this.deps.getSettings().markerProperty);
