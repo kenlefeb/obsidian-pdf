@@ -69,12 +69,17 @@ note" on (the defaults), on desktop and on a phone. Open the developer console (
 - [ ] With "Spike: toggle event log" on, rename a wrapped note: the PDF still follows (the spike log must not take the local-intent mark).
 - [ ] "Spike: rename a test pair" still renames the note and its PDF with a "Renamed the pair" notice and no "Could not" notice.
 - [ ] Wrap a PDF from the file menu: nothing else is renamed, moved or deleted, and no extra notice appears.
+- [ ] Rename a wrapped PDF from its tab, and (separately) from the explorer, where other notes link to that PDF: the note follows, its body and frontmatter are intact (nothing duplicated, cut off or reverted), its marker reads `[[<new pdf path>|<new pdf name>]]`, and the other notes now link to the new PDF name.
+- [ ] Move a folder holding several pairs inside Obsidian: no error notice, every pair is intact (note and PDF together, markers point at the new paths), nothing lands in the trash.
+- [ ] Delete a folder holding several pairs inside Obsidian: no error notice, every pair is gone together, and nothing from it lands in the trash outside that folder (the trash holds the folder, not loose files).
 
 ### Assumptions about Obsidian the code relies on (unverified; confirm each)
 
 The plugin's event handling was built without a running Obsidian. Each line is a behaviour the code assumes;
 report any that does not hold.
 
+- [ ] The plugin's wrapper is in place: with the plugin enabled, paste `app.fileManager.renameFile.toString()` into the developer console. It should print a short wrapper function (calling `next.call(...)`), not Obsidian's own long implementation. Also `Object.prototype.hasOwnProperty.call(app.fileManager, "renameFile")` should print `true`. If either is not so, Obsidian's UI may not go through the wrapped method, and the plugin may react before Obsidian has finished updating links.
+- [ ] Obsidian's own rename from the explorer and from a tab's title goes through `app.fileManager.renameFile` (the plugin waits for that call to finish before following, so links are rewritten first).
 - [ ] A rename or move in the explorer fires `vault` `rename` with the new file and the old path, and goes through `Vault.rename` (so it is recognised as local). Check with the spike log: `local` is `true` for in-app renames, moves and deletes, and `false` for Finder changes.
 - [ ] When `vault` `rename` fires for a note, `metadataCache` already has that note's frontmatter under the new path (a followed rename works on the first try, not only after a recheck).
 - [ ] After renaming a PDF in Obsidian, the note's claim either still names the old path or already names the new one when the plugin looks; both are handled. Confirm the marker ends up canonical and is not rewritten a second time by Obsidian's link updater into a different form.

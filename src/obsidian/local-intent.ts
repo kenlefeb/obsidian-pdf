@@ -1,37 +1,40 @@
-import { TFolder, type App, type TAbstractFile, type Vault } from "obsidian";
+import { TFolder, type App, type FileManager, type TAbstractFile, type Vault } from "obsidian";
 import { around } from "monkey-around";
-
-/** How long a mark stays valid after the wrapped method was called. */
-const MARK_TTL_MS = 5000;
-
-interface Mark {
-	expires: number;
-	folder: boolean;
-}
+import { IntentMarks } from "../core/marks.ts";
 
 /**
  * Notes which paths are being changed by this device's own Obsidian, by wrapping
  * the `Vault` methods that in-app renames, moves and deletes go through.
  * Changes Obsidian picks up from the file system (Finder, sync) are expected not
  * to pass through these methods. That expectation is unverified; see spike 2.
+ *
+ * It also tracks every wrapped call still running (including `FileManager.renameFile`,
+ * which rewrites links after `Vault.rename` has returned), so a reaction can wait until
+ * the user's own operation has fully finished.
  */
 export class LocalIntent {
-	private readonly marks = new Map<string, Mark>();
+	private readonly marks = new IntentMarks();
+	private readonly inFlight = new Set<Promise<unknown>>();
 
 	constructor(private readonly app: App) {}
 
-	/** Wraps `Vault.rename`, `Vault.trash` and `Vault.delete`. Returns the uninstaller. */
+	/** Wraps `Vault.rename`, `Vault.trash`, `Vault.delete` and `FileManager.renameFile`. Returns the uninstaller. */
 	install(): () => void {
+		/** Runs `run`, counting it as in flight until it settles. */
+		const follow = <T>(run: () => Promise<T>): Promise<T> => {
+			const pending = run();
+			const settled = pending.then(() => undefined, () => undefined);
+			this.inFlight.add(settled);
+			void settled.then(() => this.inFlight.delete(settled));
+			return pending;
+		};
+
 		const track = <T>(file: TAbstractFile, run: () => Promise<T>): Promise<T> => {
-			const path = file.path;
-			const mark = this.mark(file);
 			// If the call fails, the change did not happen, so the path is not being changed locally.
-			const unmark = () => {
-				if (this.marks.get(path) === mark) this.marks.delete(path);
-			};
+			const unmark = this.marks.mark(file.path, file instanceof TFolder);
 			let pending: Promise<T>;
 			try {
-				pending = run();
+				pending = follow(run);
 			} catch (error) {
 				unmark();
 				throw error;
@@ -42,10 +45,10 @@ export class LocalIntent {
 			});
 		};
 
-		// Wrap the vault instance rather than Vault.prototype: Obsidian reaches these
-		// methods through `app.vault`, and an own property on the instance shadows the
-		// prototype for every caller without altering the class for anything else.
-		return around(this.app.vault, {
+		// Wrap the instances rather than the prototypes: Obsidian reaches these methods
+		// through `app.vault` and `app.fileManager`, and an own property on the instance shadows
+		// the prototype for every caller without altering the class for anything else.
+		const unwrapVault = around(this.app.vault, {
 			rename(next) {
 				return function (this: Vault, file: TAbstractFile, newPath: string) {
 					return track(file, () => next.call(this, file, newPath));
@@ -62,6 +65,19 @@ export class LocalIntent {
 				};
 			},
 		});
+		// No mark of its own: the `Vault.rename` inside it marks the path. This only keeps the
+		// operation in flight while Obsidian updates links to the renamed file.
+		const unwrapFileManager = around(this.app.fileManager, {
+			renameFile(next) {
+				return function (this: FileManager, file: TAbstractFile, newPath: string) {
+					return follow(() => next.call(this, file, newPath));
+				};
+			},
+		});
+		return () => {
+			unwrapFileManager();
+			unwrapVault();
+		};
 	}
 
 	/**
@@ -71,34 +87,18 @@ export class LocalIntent {
 	 * folder move or delete fires one event per child in no guaranteed order.
 	 */
 	consume(path: string): boolean {
-		return this.check(path, true);
+		return this.marks.consume(path);
 	}
 
 	/** What `consume(path)` would answer, without using a mark up. For diagnostics that must not take a mark from the Watcher. */
 	peek(path: string): boolean {
-		return this.check(path, false);
+		return this.marks.peek(path);
 	}
 
-	private check(path: string, useUp: boolean): boolean {
-		const now = Date.now();
-		for (const [markedPath, mark] of this.marks) {
-			if (mark.expires <= now) this.marks.delete(markedPath);
+	/** Resolves once no wrapped call is running (at once when none is). Never rejects. */
+	async whenIdle(): Promise<void> {
+		while (this.inFlight.size > 0) {
+			await Promise.all([...this.inFlight]);
 		}
-
-		const exact = this.marks.get(path);
-		if (exact) {
-			if (useUp && !exact.folder) this.marks.delete(path);
-			return true;
-		}
-		for (const [markedPath, mark] of this.marks) {
-			if (mark.folder && path.startsWith(`${markedPath}/`)) return true;
-		}
-		return false;
-	}
-
-	private mark(file: TAbstractFile): Mark {
-		const mark: Mark = { expires: Date.now() + MARK_TTL_MS, folder: file instanceof TFolder };
-		this.marks.set(file.path, mark);
-		return mark;
 	}
 }

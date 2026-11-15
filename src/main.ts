@@ -4,7 +4,8 @@ import { PdfWrapperSettingTab } from "./settings.ts";
 import { existingSiblingNote, wrapPdf, WrapMessage } from "./pdf-wrapper.ts";
 import { isPdf } from "./core/paths.ts";
 import { LocalIntent } from "./obsidian/local-intent.ts";
-import { Executor, OwnChanges } from "./obsidian/execute.ts";
+import { OwnChanges } from "./core/marks.ts";
+import { Executor } from "./obsidian/execute.ts";
 import { Watcher } from "./obsidian/watcher.ts";
 import { registerSpike } from "./spike/spike.ts";
 
@@ -25,7 +26,7 @@ export default class PdfWrapperPlugin extends Plugin {
 			own,
 			executor,
 			getSettings: () => this.settings,
-			onRecheck: () => {}, // A later task supplies the scan.
+			onRecheck: () => {}, // A later task supplies the scan: (pendingRemoved: string[]) => void.
 		});
 		watcher.start();
 

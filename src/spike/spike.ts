@@ -1,7 +1,7 @@
 // Throwaway spike code (plan task 5). Remove once the spike results are recorded.
 import { FuzzySuggestModal, Modal, Notice, Platform, Setting, TFile, TFolder, type App, type Plugin, type TAbstractFile } from "obsidian";
 import { buildExplorerCss } from "../core/explorer-css.ts";
-import type { OwnChanges } from "../obsidian/execute.ts";
+import type { OwnChanges } from "../core/marks.ts";
 import type { LocalIntent } from "../obsidian/local-intent.ts";
 
 const LOG_PREFIX = "pdf-wrapper-spike-log-";

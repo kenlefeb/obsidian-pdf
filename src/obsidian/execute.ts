@@ -1,37 +1,9 @@
 import { Notice, type App, type TAbstractFile } from "obsidian";
+import type { OwnChanges } from "../core/marks.ts";
 import type { Action } from "../core/types.ts";
 import type { PdfWrapperSettings } from "../core/settings-data.ts";
 import { siblingNotePath, wrapPdf, WrapIncomplete, WrapMessage } from "../pdf-wrapper.ts";
 import { EmbedUpdateError, writeClaim } from "./snapshot.ts";
-
-/** How long a mark stays valid, the same as LocalIntent's. */
-const OWN_CHANGE_TTL_MS = 5000;
-
-/**
- * Paths the plugin itself is about to change, so the Watcher does not react to the plugin's own
- * renames, copies, deletes and new notes. Marked just before the vault call; the event uses the mark up.
- */
-export class OwnChanges {
-	private readonly marks = new Map<string, { expires: number }>();
-
-	/** Marks `path` and returns a function that removes this mark again (for a vault call that failed). */
-	mark(path: string): () => void {
-		const mark = { expires: Date.now() + OWN_CHANGE_TTL_MS };
-		this.marks.set(path, mark);
-		return () => {
-			if (this.marks.get(path) === mark) this.marks.delete(path);
-		};
-	}
-
-	/** True, once, if `path` was marked within the last 5000 ms. */
-	consume(path: string): boolean {
-		const now = Date.now();
-		for (const [markedPath, mark] of this.marks) {
-			if (mark.expires <= now) this.marks.delete(markedPath);
-		}
-		return this.marks.delete(path);
-	}
-}
 
 /** What became of one action: carried out, or skipped because a file it needs is no longer there. */
 type Outcome = "done" | "stale";
@@ -139,12 +111,17 @@ export class Executor {
 	private async wrap(pdfPath: string): Promise<Outcome> {
 		const pdf = this.app.vault.getFileByPath(pdfPath);
 		if (!pdf) return "stale";
+		// Released once the wrap settles either way: if Templater created the note elsewhere and it was moved
+		// into place, no create event used the mark, and it must not linger.
+		const release = this.own.mark(siblingNotePath(pdf));
 		try {
-			await this.withMark(siblingNotePath(pdf), () => wrapPdf(this.app, this.getSettings(), this.saveSettings, pdf, { open: false }));
+			await wrapPdf(this.app, this.getSettings(), this.saveSettings, pdf, { open: false });
 		} catch (error) {
 			// The PDF is wrapped; only a later step failed. Say so and carry on.
 			if (!(error instanceof WrapIncomplete)) throw error;
 			new Notice(error.message);
+		} finally {
+			release();
 		}
 		return "done";
 	}

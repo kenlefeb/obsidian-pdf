@@ -3,8 +3,10 @@ import { parseClaim } from "../core/claims.ts";
 import { isNote, isPdf } from "../core/paths.ts";
 import { react } from "../core/react.ts";
 import type { PdfWrapperSettings } from "../core/settings-data.ts";
-import type { Snapshot, VaultEvent } from "../core/types.ts";
-import type { Executor, OwnChanges } from "./execute.ts";
+import type { OwnChanges } from "../core/marks.ts";
+import { withoutPath } from "../core/snapshot.ts";
+import type { VaultEvent } from "../core/types.ts";
+import type { Executor } from "./execute.ts";
 import type { LocalIntent } from "./local-intent.ts";
 import { gatherSnapshot } from "./snapshot.ts";
 
@@ -16,20 +18,11 @@ export interface WatcherDeps {
 	own: OwnChanges;
 	executor: Executor;
 	getSettings: () => PdfWrapperSettings;
-	/** Called once per settle window; with each PDF whose note was removed outside Obsidian, or once with null. */
-	onRecheck: (pendingRemoved: string | null) => void;
+	/** Called once per settle window, with every PDF whose note was removed outside Obsidian in it (often none). */
+	onRecheck: (pendingRemoved: string[]) => void;
 }
 
 const reason = (error: unknown): string => (error instanceof Error ? error.message : String(error));
-
-/** A snapshot with every trace of `path` removed (a deleted file the caches may still remember). */
-function without(snapshot: Snapshot, path: string): Snapshot {
-	return {
-		notePaths: snapshot.notePaths.filter((p) => p !== path),
-		pdfPaths: snapshot.pdfPaths.filter((p) => p !== path),
-		claims: snapshot.claims.filter((c) => c.notePath !== path),
-	};
-}
 
 /**
  * Follows renames, moves and deletes made inside Obsidian across a pair, by passing each vault event to
@@ -39,9 +32,14 @@ export class Watcher {
 	private queue: Promise<void> = Promise.resolve();
 	private recheckTimer: number | null = null;
 	private readonly pendingRemoved = new Set<string>();
+	/** Set when the plugin unloads: nothing is renamed, trashed or rechecked after that. */
+	private unloaded = false;
 
 	constructor(private readonly plugin: Plugin, private readonly deps: WatcherDeps) {
-		plugin.register(() => this.cancelRecheck());
+		plugin.register(() => {
+			this.unloaded = true;
+			this.cancelRecheck();
+		});
 	}
 
 	/** Registers the handlers once the layout is ready, so the `create` fired for every file on load is not seen. */
@@ -102,14 +100,21 @@ export class Watcher {
 	}
 
 	private enqueue(event: VaultEvent): void {
-		this.queue = this.queue.then(() => this.handle(event));
+		this.queue = this.queue
+			.then(() => this.handle(event))
+			.catch((error: unknown) => console.error("PDF Wrapper: event handling failed", event, error));
 	}
 
-	/** Never rejects: a failure is explained to the user and leads to a recheck. */
+	/** A failure is explained to the user and leads to a recheck. */
 	private async handle(event: VaultEvent): Promise<void> {
+		if (this.unloaded) return;
 		try {
+			// Let the user's own operation finish first (Obsidian rewrites links after Vault.rename returns).
+			// This cannot wait on itself: events run one at a time, so no Executor call is in flight here.
+			await this.deps.localIntent.whenIdle();
+			if (this.unloaded) return;
 			let snapshot = gatherSnapshot(this.plugin.app, this.deps.getSettings().markerProperty);
-			if (event.kind === "delete") snapshot = without(snapshot, event.path);
+			if (event.kind === "delete") snapshot = withoutPath(snapshot, event.path);
 			const reaction = react(event, snapshot);
 			let recheck = reaction.recheck;
 			if (reaction.actions.length > 0) {
@@ -132,6 +137,7 @@ export class Watcher {
 
 	/** Debounced: the recheck runs SETTLE_MS after the last request, once for the whole burst. */
 	private requestRecheck(pendingRemoved: string | null): void {
+		if (this.unloaded) return;
 		if (pendingRemoved !== null) this.pendingRemoved.add(pendingRemoved);
 		this.cancelRecheck();
 		this.recheckTimer = window.setTimeout(() => this.fireRecheck(), SETTLE_MS);
@@ -142,8 +148,7 @@ export class Watcher {
 		const pending = [...this.pendingRemoved];
 		this.pendingRemoved.clear();
 		try {
-			if (pending.length === 0) this.deps.onRecheck(null);
-			for (const path of pending) this.deps.onRecheck(path);
+			this.deps.onRecheck(pending);
 		} catch (error) {
 			console.error("PDF Wrapper: recheck failed", error);
 		}
