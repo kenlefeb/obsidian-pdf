@@ -27,6 +27,7 @@
 - A scan never changes files.
 - The file explorer is touched by generated styling rules only: no explorer internals, no DOM observers, no `<style>` elements (lint forbids them; use `document.adoptedStyleSheets`).
 - The plugin does not read or write `attachment` / `attachments`.
+- Wrapping has no prerequisites: a missing template is created, an incomplete one is repaired by text insertion only (never a YAML re-serialise), and any failure is reported with the path and the reason.
 - No Obsidian instance exists in CI or the cloud environment. Obsidian-layer behaviour is verified by build, lint, and the owner's manual checklist; say so plainly in task reports and never claim it was run.
 
 ## Review Focus
@@ -52,6 +53,7 @@ Input classes the spec implies that are most likely to bite, each pinned by a te
 | `src/core/classify.ts` | Snapshot → pair states and unwrapped PDFs. |
 | `src/core/embeds.ts` | Rewrite PDF embeds in note text. |
 | `src/core/explorer-css.ts` | Healthy pairs → stylesheet text. |
+| `src/core/template.ts` | Default template text and path; check and repair of a template's required parts. |
 | `src/core/react.ts` | Vault event + snapshot → actions / recheck / pending. Auto-wrap decision. |
 | `src/core/fixes.ts` | Attention items, available fixes, fix → actions, copy naming. |
 | `src/obsidian/snapshot.ts` | Build a snapshot from `vault` and `metadataCache`. |
@@ -380,12 +382,114 @@ Throwaway code. No unit tests. Its purpose is to answer the spec's two spikes be
 
 - [ ] **Step 5: Commit** `chore: add spike build for explorer hiding and local-intent detection`.
 
-- [ ] **Step 6: STOP and hand to the owner.** Give them the built `main.js`, `manifest.json`, `styles.css` and the checklist. Do not start Task 6 until the results are back. Then:
+- [ ] **Step 6: STOP and hand to the owner.** Give them the built `main.js`, `manifest.json`, `styles.css` and the checklist. Tasks 6a and 6 (wrapping) do not depend on the results and may proceed; do not start Task 7 or later until the results are back. Then:
   - Local intent dependable (all in-app `local=true`, no outside change `local=true`): continue as planned.
   - Any in-app action not detected, or any sync/Finder change detected as local: **do not continue.** Report to the owner; the spec requires their decision.
   - Rename arrives as delete-then-create: no plan change (non-local deletes only list), but record the observed gap and set `SETTLE_MS` in Task 8 to at least twice it.
   - Explorer hiding misbehaves at the owner's document count: Task 13 ships with `hidePairedPdfs` defaulting to `false`; change `DEFAULT_SETTINGS` and its test there.
   - Record the outcome in a short "Results" section appended to the checklist file and commit it.
+
+---
+
+### Task 6a: Prepare the template
+
+This task and Task 6 do not depend on the spike results and may be built before they are back.
+
+**Files:**
+- Create: `src/core/template.ts`, `tests/core/template.test.ts`
+
+**Interfaces:**
+- Consumes: `joinPath` (Task 2).
+- Produces:
+  ```ts
+  export const DEFAULT_TEMPLATE_NAME = 'Wrapped PDF.md';
+  export const DEFAULT_TEMPLATE_FOLDER = 'Templates';
+  export const EMBED_LINE = '![[{{title}}.pdf]]';
+  export function defaultTemplate(markerProperty: string): string; // `---\n<marker>:\n---\n\n![[{{title}}.pdf]]\n`
+  export function defaultTemplatePath(folders: { templater: string | null; coreTemplates: string | null }): string;
+  export function templatePathWithExtension(templatePath: string): string; // appends '.md' unless already present (case-insensitive)
+  export interface TemplateCheck { text: string; added: ('marker' | 'embed')[] }
+  export function ensureTemplateComponents(text: string, markerProperty: string): TemplateCheck;
+  ```
+
+Rules for `ensureTemplateComponents` — text insertion only, never a YAML parse and re-serialise:
+- Frontmatter is present only when the text starts with a line that is exactly `---` and a later line is exactly `---`. Line endings (`\n` or `\r\n`) are preserved; inserted lines use the file's existing line ending (`\n` if none found).
+- Marker present: some line inside the frontmatter block matches `^<marker>\s*:` with the marker name matched literally and exactly (case-sensitive). If absent and frontmatter exists, insert `<marker>:` as the first line of the block. If there is no frontmatter, prepend `---`, `<marker>:`, `---`, and a blank line.
+- Embed present: the body (text after the frontmatter) contains an embed `![[target…]]` whose target, before any `|` or `#`, ends in `.pdf` case-insensitively, or contains `{{` or `<%`. If absent, append `EMBED_LINE` as the last line, separated from existing body text by one blank line, with a trailing line ending.
+- `added` lists what was inserted, marker before embed. When nothing is missing, `text` is the input, identical.
+
+`defaultTemplatePath`: a folder value is used when it is a non-empty string after trimming and stripping leading and trailing slashes, and is not `/`. Templater's folder wins over the core Templates folder; otherwise `Templates`. Result is `joinPath(folder, 'Wrapped PDF.md')`.
+
+- [ ] **Step 1: Write the failing tests** in `tests/core/template.test.ts`:
+
+```ts
+test('default template has the marker and the embed', () => {
+  expect(defaultTemplate('wrapped-pdf')).toBe('---\nwrapped-pdf:\n---\n\n![[{{title}}.pdf]]\n');
+});
+test('the default template needs nothing added', () => {
+  const t = defaultTemplate('pdf'); expect(ensureTemplateComponents(t, 'pdf')).toEqual({ text: t, added: [] });
+});
+test('default path prefers Templater, then core Templates, then Templates', () => {
+  expect(defaultTemplatePath({ templater: 'T', coreTemplates: 'C' })).toBe('T/Wrapped PDF.md');
+  expect(defaultTemplatePath({ templater: null, coreTemplates: '/Meta/Templates/' })).toBe('Meta/Templates/Wrapped PDF.md');
+  expect(defaultTemplatePath({ templater: '  ', coreTemplates: '/' })).toBe('Templates/Wrapped PDF.md');
+  expect(defaultTemplatePath({ templater: null, coreTemplates: null })).toBe('Templates/Wrapped PDF.md');
+});
+test('templatePathWithExtension', () => {
+  expect(templatePathWithExtension('T/pdf')).toBe('T/pdf.md'); expect(templatePathWithExtension('T/pdf.md')).toBe('T/pdf.md');
+  expect(templatePathWithExtension('T/pdf.MD')).toBe('T/pdf.MD');
+});
+test('adds the marker as the first frontmatter line, leaving the rest byte-for-byte', () => {
+  const t = '---\ncreated: <% tp.date.now() %>\ntags: [a, b]\n---\n# <% tp.file.title %>\n\n![[<% tp.file.title %>.pdf]]\n';
+  const r = ensureTemplateComponents(t, 'wrapped-pdf');
+  expect(r.added).toEqual(['marker']);
+  expect(r.text).toBe('---\nwrapped-pdf:\ncreated: <% tp.date.now() %>\ntags: [a, b]\n---\n# <% tp.file.title %>\n\n![[<% tp.file.title %>.pdf]]\n');
+});
+test('adds frontmatter when there is none', () => {
+  expect(ensureTemplateComponents('![[{{title}}.pdf]]\n', 'wrapped-pdf')).toEqual({ text: '---\nwrapped-pdf:\n---\n\n![[{{title}}.pdf]]\n', added: ['marker'] });
+});
+test('appends the embed when the body has none', () => {
+  expect(ensureTemplateComponents('---\nwrapped-pdf:\n---\nNotes about {{title}}', 'wrapped-pdf'))
+    .toEqual({ text: '---\nwrapped-pdf:\n---\nNotes about {{title}}\n\n![[{{title}}.pdf]]\n', added: ['embed'] });
+});
+test('empty template gets both', () => {
+  expect(ensureTemplateComponents('', 'wrapped-pdf')).toEqual({ text: '---\nwrapped-pdf:\n---\n\n![[{{title}}.pdf]]\n', added: ['marker', 'embed'] });
+});
+test('existing marker with a value, or a different marker name', () => {
+  expect(ensureTemplateComponents('---\nwrapped-pdf: "[[x.pdf]]"\n---\n![[a.pdf]]\n', 'wrapped-pdf').added).toEqual([]);
+  expect(ensureTemplateComponents('---\nwrapped-pdf:\n---\n![[a.pdf]]\n', 'pdf').added).toEqual(['marker']);
+  expect(ensureTemplateComponents('---\nwrapped-pdf-old:\n---\n![[a.pdf]]\n', 'wrapped-pdf').added).toEqual(['marker']);
+});
+test('what counts as an embed', () => {
+  const has = (body: string) => !ensureTemplateComponents('---\nm:\n---\n' + body, 'm').added.includes('embed');
+  expect(has('![[Scan.PDF]]')).toBe(true); expect(has('![[a/b.pdf#page=2|x]]')).toBe(true);
+  expect(has('![[{{title}}]]')).toBe(true); expect(has('![[<% tp.file.title %>]]')).toBe(true);
+  expect(has('[[a.pdf]]')).toBe(false); expect(has('![[photo.png]]')).toBe(false); expect(has('a.pdf')).toBe(false);
+});
+test('an embed mentioned only in the frontmatter does not count', () => {
+  expect(ensureTemplateComponents('---\nm:\ncover: "![[a.pdf]]"\n---\ntext\n', 'm').added).toEqual(['embed']);
+});
+test('CRLF files keep CRLF', () => {
+  const r = ensureTemplateComponents('---\r\ntitle: x\r\n---\r\nbody\r\n', 'm');
+  expect(r.text).toBe('---\r\nm:\r\ntitle: x\r\n---\r\nbody\r\n\r\n![[{{title}}.pdf]]\r\n');
+});
+test('an unclosed frontmatter fence is treated as no frontmatter', () => {
+  const r = ensureTemplateComponents('---\ntitle: x\nbody', 'm');
+  expect(r.text.startsWith('---\nm:\n---\n\n---\ntitle: x\nbody')).toBe(true);
+});
+test('marker names with regex metacharacters are matched literally', () => {
+  expect(ensureTemplateComponents('---\na.b:\n---\n![[x.pdf]]\n', 'a.b').added).toEqual([]);
+  expect(ensureTemplateComponents('---\naxb:\n---\n![[x.pdf]]\n', 'a.b').added).toEqual(['marker']);
+});
+test('running it twice changes nothing the second time', () => {
+  const once = ensureTemplateComponents('hello', 'm').text; expect(ensureTemplateComponents(once, 'm')).toEqual({ text: once, added: [] });
+});
+```
+
+- [ ] **Step 2: Run** `npm test` — expected: FAIL, module not found.
+- [ ] **Step 3: Implement** `src/core/template.ts`.
+- [ ] **Step 4: Run** `npm test` — expected: PASS.
+- [ ] **Step 5: Commit** `feat: prepare wrap templates without prerequisites`.
 
 ---
 
@@ -396,7 +500,7 @@ Throwaway code. No unit tests. Its purpose is to answer the spec's two spikes be
 - Modify: `src/pdf-wrapper.ts`, `src/main.ts`
 
 **Interfaces:**
-- Consumes: `parseClaim`, `formatClaim`, `isLinkSafeName` (Task 2); `Snapshot`, `NoteClaim` (Task 3); `rewriteEmbeds` (Task 4); `PdfWrapperSettings` (Task 1).
+- Consumes: `parseClaim`, `formatClaim`, `isLinkSafeName` (Task 2); `Snapshot`, `NoteClaim` (Task 3); `rewriteEmbeds` (Task 4); `PdfWrapperSettings` (Task 1); `defaultTemplate`, `defaultTemplatePath`, `templatePathWithExtension`, `ensureTemplateComponents` (Task 6a).
 - Produces:
   ```ts
   // src/obsidian/snapshot.ts
@@ -404,19 +508,27 @@ Throwaway code. No unit tests. Its purpose is to answer the spec's two spikes be
   export function gatherSnapshot(app: App, markerProperty: string): Snapshot;
   export async function writeClaim(app: App, note: TFile, markerProperty: string, pdfPath: string, oldTargets: string[]): Promise<void>; // processFrontMatter sets the marker to formatClaim(pdfPath), then rewrites embeds in the body via vault.process
   // src/pdf-wrapper.ts
-  export async function wrapPdf(app: App, settings: PdfWrapperSettings, pdfFile: TFile, options: { open: boolean }): Promise<TFile>;
+  export async function prepareTemplate(app: App, settings: PdfWrapperSettings, saveSettings: () => Promise<void>): Promise<TFile>; // creates or repairs the template; throws Error with a user-facing message
+  export async function wrapPdf(app: App, settings: PdfWrapperSettings, saveSettings: () => Promise<void>, pdfFile: TFile, options: { open: boolean }): Promise<TFile>;
   ```
   Frontmatter key lookup for the marker is exact-match on the configured name.
 
 - [ ] **Step 1: Implement `snapshot.ts`.** `gatherSnapshot` lists `vault.getFiles()` split by `isNote`/`isPdf` and collects `readClaim` for every note.
 
-- [ ] **Step 2: Rewrite `wrapPdf`.** Remove `resolveAttachmentFolder`, `ensureFolder`, `updateFrontmatter`, `updateEmbedLinks` and every use of the attachment folder; the PDF is not moved. Keep `createNoteFromTemplate` and the Templater / core Templates code unchanged. New order: refuse if `!isLinkSafeName(pdfFile.path)` (message: "Cannot wrap <name>: file names containing [ ] | # ^ cannot be linked. Rename the PDF first."); refuse if the sibling note exists; refuse if the template is missing; create the note; `writeClaim(app, note, settings.markerProperty, pdfFile.path, [pdfFile.name, pdfFile.basename])`; open the note only when `options.open`. If Templater returns a file at a different path than `<folder>/<basename>.md` (a template that renames itself), move it back with `fileManager.renameFile` before writing the claim.
+- [ ] **Step 2: Rewrite `wrapPdf`.** Remove `resolveAttachmentFolder`, `ensureFolder`, `updateFrontmatter`, `updateEmbedLinks` and every use of the attachment folder; the PDF is not moved. Keep `createNoteFromTemplate` and the Templater / core Templates code unchanged. New order: refuse if `!isLinkSafeName(pdfFile.path)` (message: "Cannot wrap <name>: file names containing [ ] | # ^ cannot be linked. Rename the PDF first."); refuse if the sibling note exists; `prepareTemplate` (below); create the note; `writeClaim(app, note, settings.markerProperty, pdfFile.path, [pdfFile.name, pdfFile.basename])`; open the note only when `options.open`. If Templater returns a file at a different path than `<folder>/<basename>.md` (a template that renames itself), move it back with `fileManager.renameFile` before writing the claim.
 
-- [ ] **Step 3: Update `main.ts`.** File-menu item passes `{ open: true }`. Add command id `wrap-active-pdf`, name "Wrap active PDF", using `checkCallback` that is available only when the active file is a PDF with no sibling note.
+- [ ] **Step 2b: Implement `prepareTemplate`** in `src/pdf-wrapper.ts`. Wrapping has no prerequisites (spec, "No prerequisites"):
+  - If `settings.templatePath` is empty: path = `defaultTemplatePath({ templater, coreTemplates })`, reading Templater's folder from `app.plugins.plugins['templater-obsidian'].settings.templates_folder` and the core plugin's from `internalPlugins.getPluginById('templates').instance.options.folder` (both undocumented; guard every step, treat anything unexpected as `null`). Create missing parent folders, create the file with `defaultTemplate(settings.markerProperty)`, store the path in `settings.templatePath` in the same form the settings tab stores it (without `.md`), `await saveSettings()`, Notice "Created a default template at <path>." If a file already exists at that path, use it instead of overwriting.
+  - If `settings.templatePath` is set but no file exists at `templatePathWithExtension(...)`: create the default there (parents too), Notice "The template <path> was missing, so a default was created there." The setting is not changed.
+  - Then, for whichever template file is in hand: read it, `ensureTemplateComponents(text, settings.markerProperty)`; if `added` is non-empty, write the new text with `vault.modify` and Notice "Updated the template <path>: added <the marker property `<name>` | a PDF embed | both, joined with ' and '>."
+  - Every failure throws an `Error` whose message names the path and the reason: "Could not create the default template at <path>: <reason>." / "Could not update the template <path>: <reason>." / "<path> is a folder, not a template file." Reasons come from the caught error's message; a folder or non-markdown file at the path is detected explicitly. Nothing is swallowed.
+  - Remove the "No PDF template configured" check and notice from `main.ts`; `handleWrapPdf` shows `Failed to wrap <name>: <message>` for any thrown error.
+
+- [ ] **Step 3: Update `main.ts`.** Pass `() => this.saveSettings()` to `wrapPdf`. File-menu item passes `{ open: true }`. Add command id `wrap-active-pdf`, name "Wrap active PDF", using `checkCallback` that is available only when the active file is a PDF with no sibling note.
 
 - [ ] **Step 4: Verify** `npm run build && npm run lint && npm test` — expected: pass.
 
-- [ ] **Step 5: Add to the manual checklist** (create `docs/manual-test-checklist.md`): wrap from file menu and from palette; note appears beside the PDF; PDF did not move; marker property present in canonical form even when the template has no frontmatter; `![[{{title}}.pdf]]` in the template renders the PDF; wrapping `a|b.pdf` is refused; wrapping when the note exists is refused; with and without Templater.
+- [ ] **Step 5: Add to the manual checklist** (create `docs/manual-test-checklist.md`): wrap from file menu and from palette; note appears beside the PDF; PDF did not move; marker property present in canonical form even when the template has no frontmatter; `![[{{title}}.pdf]]` in the template renders the PDF; wrapping `a|b.pdf` is refused; wrapping when the note exists is refused; with and without Templater. Fresh install with no template set: wrapping creates `Templates/Wrapped PDF.md` (or in the Templater / core Templates folder when one is set), fills the setting, and the note shows the PDF. Template setting pointing at a deleted file: a default appears at that path. A template with no frontmatter and no embed gains both and a notice says so; a Templater template with `<% %>` expressions in its frontmatter is otherwise unchanged byte for byte; wrapping again adds nothing. A folder named like the template path produces a notice naming it.
 
 - [ ] **Step 6: Commit** `feat: wrap PDFs in place with a dedicated marker property`.
 
@@ -544,7 +656,7 @@ Write real bodies for every commented test using the same helpers.
   // execute.ts
   export class OwnChanges { mark(path: string): void; consume(path: string): boolean } // same 5000 ms expiry as LocalIntent
   export class Executor {
-    constructor(app: App, getSettings: () => PdfWrapperSettings, own: OwnChanges);
+    constructor(app: App, getSettings: () => PdfWrapperSettings, saveSettings: () => Promise<void>, own: OwnChanges);
     run(actions: Action[]): Promise<void>; // sequential; stops at the first failure, shows a Notice with the error, and rethrows
   }
   // watcher.ts
@@ -555,7 +667,7 @@ Write real bodies for every commented test using the same helpers.
   }
   ```
 
-Execution of each action: `rename` → `own.mark(from)` then `fileManager.renameFile`, refusing (throw) if `to` exists. `copy` → `own.mark(to)` then `vault.copy`, refusing if `to` exists. `setClaim` → `writeClaim`. `removeClaim` → `processFrontMatter` deleting the marker key. `delete` → no-op if the file no longer exists (a folder delete removes both); otherwise `own.mark(path)` then `fileManager.trashFile`. `wrap` → `wrapPdf(..., { open: false })` after marking the note path. `notice` → `new Notice(message)`.
+Execution of each action: `rename` → `own.mark(from)` then `fileManager.renameFile`, refusing (throw) if `to` exists. `copy` → `own.mark(to)` then `vault.copy`, refusing if `to` exists. `setClaim` → `writeClaim`. `removeClaim` → `processFrontMatter` deleting the marker key. `delete` → no-op if the file no longer exists (a folder delete removes both); otherwise `own.mark(path)` then `fileManager.trashFile`. `wrap` → `wrapPdf(app, settings, saveSettings, pdf, { open: false })` after marking the note path (the Executor is constructed with a `saveSettings` callback as well as `getSettings`). `notice` → `new Notice(message)`.
 
 Watcher: on `vault` `rename` and `create`, and on `metadataCache` `deleted` (notes, with `claimedPdf` resolved from `prevCache.frontmatter[markerProperty]` via `parseClaim` and `getFirstLinkpathDest`) and `vault` `delete` (PDFs only): skip if `own.consume(path or oldPath)`; compute `local = localIntent.consume(oldPath ?? path)`; `react(event, gatherSnapshot(...))`; run the actions; if `recheck`, call `onRecheck(pendingRemoved)` once after `SETTLE_MS`, coalescing calls that fall within the same window. Folder rename events are ignored (their children fire their own).
 
@@ -684,11 +796,11 @@ Write real bodies for every commented test.
   export function setAutoWrap(app: App, on: boolean): void;   // app.saveLocalStorage
   export class AutoWrapper {
     constructor(app: App, executor: Executor, getSettings: () => PdfWrapperSettings, attachmentFolder: () => string | null);
-    onPdfCreated(path: string): void; // waits SETTLE_MS, then re-gathers the snapshot and wraps only if shouldAutoWrap is still true and a template is configured
+    onPdfCreated(path: string): void; // waits SETTLE_MS, then re-gathers the snapshot and wraps only if shouldAutoWrap is still true
   }
   ```
 
-- [ ] **Step 1: Implement `auto-wrap.ts`.** After a successful wrap show a Notice "Wrapped <name>". If no template is configured, show one Notice per session ("Set a template in PDF Wrapper settings to wrap new PDFs automatically.") and do nothing. Pending timers are cleared on unload.
+- [ ] **Step 1: Implement `auto-wrap.ts`.** After a successful wrap show a Notice "Wrapped <name>". Automatic wrapping goes through the same `wrapPdf` as a manual wrap, so it creates or repairs the template when needed; it never skips a PDF for want of a template. If `wrapPdf` throws, show its message once per distinct message per session, so a broken template does not produce a notice for every PDF. Pending timers are cleared on unload.
 
 - [ ] **Step 2: Hook the Watcher.** On `create` of a PDF that was not the plugin's own change, call `autoWrapper.onPdfCreated(path)` when `isAutoWrapOn(app)`.
 

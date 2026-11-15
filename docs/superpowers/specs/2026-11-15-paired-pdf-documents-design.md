@@ -1,7 +1,7 @@
 # Paired PDF documents — design
 
 Date: 2026-11-15
-Status: approved by owner 2026-11-15 (revision 3)
+Status: approved by owner 2026-11-15 (revision 4: wrapping has no prerequisites)
 
 ## Intent
 
@@ -191,22 +191,58 @@ or changes a pair. *(call)*
 "Wrap PDF" on a PDF's file menu, plus a command-palette command that acts on
 the active PDF *(call)*.
 
-- Creates `<name>.md` beside the PDF from the configured template. **The PDF
-  no longer moves.** The attachment-folder logic is removed.
+- Creates `<name>.md` beside the PDF from the template. **The PDF no longer
+  moves.** The attachment-folder logic is removed.
 - Template handling is unchanged: Templater if present, otherwise the core
   Templates placeholders (`{{title}}`, `{{date}}`, `{{time}}`).
 - The plugin always sets the marker property on the new note, whether or not
   the template mentions it.
 - Embed placeholders in the template (`![[{{title}}.pdf]]` and the variants
   handled today) resolve to the canonical path.
-- Refuses, with a clear notice, if a note of that name already exists or no
-  template is configured.
+- Refuses, with a clear notice, if a note of that name already exists.
+
+**No prerequisites** (owner's decision, revision 4). Wrapping must work
+straight after installing the plugin, with nothing configured.
+
+- *No template.* If no template is configured, the plugin creates a default
+  one, saves its path in settings, tells the user where it is, and carries on
+  with the wrap. If a template is configured but the file does not exist, the
+  default is created at that configured path so the setting stands.
+- *Default template.* A frontmatter block containing the marker property, and
+  one line embedding the PDF (`![[{{title}}.pdf]]`). It needs neither
+  Templater nor the core Templates plugin.
+- *Where the default goes* *(call)*: the Templater template folder if one is
+  set; otherwise the core Templates folder if one is set; otherwise a
+  `Templates` folder at the vault root, created if needed. The file is named
+  `Wrapped PDF.md`.
+- *Template lacks something.* The necessary components are the marker
+  property in the frontmatter and an embed of the PDF in the body. Each time
+  a PDF is wrapped the template is checked; whatever is missing is added to
+  the template file itself, and the user is told what was added.
+- *How the template is edited* *(call)*: by minimal text insertion only. One
+  line is added to the existing frontmatter, or a frontmatter block is added
+  if there is none, and the embed line is appended at the end. The
+  frontmatter is never parsed and re-written, because that can mangle
+  Templater expressions.
+- *What counts as an embed being present* *(call)*: any embed of a `.pdf`
+  target, or any embed whose target contains a placeholder (`{{…}}` or a
+  Templater `<% … %>` expression). Such a template is left alone.
+- *Failure.* If any of this cannot be done, the wrap stops and a notice names
+  the file and the reason (for example, "Could not create the default
+  template at X: a folder with that name exists."). There is no generic
+  "no template configured" message.
+
+Known sync risk: two devices that both find no template before settings have
+synced will each create the default. The contents are identical, so the worst
+case is a duplicate file.
 
 ### Automatic wrapping
 
 A setting (owner's decision): wrap every PDF that is added to the vault while
-the plugin is running. The owner will have it on. Default off *(call)*,
-because it needs a template configured first.
+the plugin is running. The owner will have it on. Default off *(call)*:
+wrapping every new PDF on a fresh install, unasked, would be surprising.
+Automatic wrapping prepares the template exactly as a manual wrap does; it
+never gives up for want of one.
 
 Details, all *(call)*:
 
@@ -315,7 +351,7 @@ folder are excluded, as for automatic wrapping. *(call)*
 
 ### Settings
 
-- Template path (existing).
+- Template path (existing). May be empty; a default is created on first wrap.
 - Marker property name (default `wrapped-pdf`). Changing it does not rename
   the property in existing notes; the setting's description says so, since
   notes carrying the old name stop being recognised. *(call)*
