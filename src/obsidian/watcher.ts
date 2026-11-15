@@ -160,6 +160,10 @@ export class Watcher {
 			if (this.unloaded) return;
 			let snapshot = gatherSnapshot(this.plugin.app, this.deps.getSettings().markerProperty);
 			if (event.kind === "delete") snapshot = withoutPath(snapshot, event.path);
+			// Checked as late as possible, so a note that has just gained an embed of the PDF (a merge) is seen.
+			if (event.kind === "delete" && event.local && event.claimedPdf !== null) {
+				event = { ...event, linkedElsewhere: this.isLinkedElsewhere(event.claimedPdf, event.path) };
+			}
 			const reaction = react(event, snapshot);
 			let recheck = reaction.recheck;
 			if (reaction.actions.length > 0) {
@@ -177,6 +181,25 @@ export class Watcher {
 			console.error("PDF Wrapper: could not react to", event, error);
 			new Notice(`PDF Wrapper could not react to the change of ${event.path}: ${reason(error)}`);
 			this.requestRecheck(null);
+		}
+	}
+
+	/**
+	 * True when a note other than `deletedNote` links to or embeds `pdfPath`, according to the metadata cache's
+	 * resolved links. Read-only. When the links cannot be read, answers true, so the PDF is kept.
+	 */
+	private isLinkedElsewhere(pdfPath: string, deletedNote: string): boolean {
+		try {
+			const { metadataCache, vault } = this.plugin.app;
+			for (const [source, targets] of Object.entries(metadataCache.resolvedLinks)) {
+				if (source === deletedNote || !Object.prototype.hasOwnProperty.call(targets, pdfPath)) continue;
+				// A note the cache still remembers but that is gone (deleted with the same folder) does not count.
+				if (vault.getFileByPath(source) !== null) return true;
+			}
+			return false;
+		} catch (error) {
+			console.warn("PDF Wrapper: could not read the links to", pdfPath, error);
+			return true;
 		}
 	}
 

@@ -24,7 +24,18 @@ export interface Classification {
 
 export type VaultEvent =
 	| { kind: "rename"; path: string; oldPath: string; local: boolean }
-	| { kind: "delete"; path: string; local: boolean; claimedPdf: string | null } // for a deleted note: its resolved claim from the previous cache
+	| {
+		kind: "delete";
+		path: string;
+		local: boolean;
+		/** For a deleted note: its resolved claim from the previous cache. */
+		claimedPdf: string | null;
+		/**
+		 * For a deleted note: false only when it was checked that no other note links to or embeds `claimedPdf`.
+		 * Absent or true keeps the PDF.
+		 */
+		linkedElsewhere?: boolean;
+	}
 	| { kind: "create"; path: string; local: boolean };
 
 export type Action =

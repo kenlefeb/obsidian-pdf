@@ -87,11 +87,20 @@ function reactToPdfRename(path: string, oldPath: string, local: boolean, snapsho
 	return followRename(path, note, oldPath, local, snapshot, (to) => ({ notePath: to, pdfPath: path }));
 }
 
-function reactToNoteDelete(path: string, local: boolean, claimedPdf: string | null, snapshot: Snapshot): Reaction {
+function reactToNoteDelete(path: string, local: boolean, claimedPdf: string | null, linkedElsewhere: boolean, snapshot: Snapshot): Reaction {
 	if (claimedPdf === null || !samePair(path, claimedPdf) || !snapshot.pdfPaths.includes(claimedPdf)) return nothing();
 	if (snapshot.claims.some((c) => c.pdfPath === claimedPdf)) return nothing();
-	if (local) return { actions: [{ type: "delete", path: claimedPdf }], recheck: false, pendingRemoved: null };
-	return nothing(true, claimedPdf);
+	if (!local) return nothing(true, claimedPdf);
+	// Other notes embed or link the PDF (for example a merge moved the embed into another note): the user deleted
+	// the note, not necessarily the document. Keep the PDF and list it, as for a delete that is not local.
+	if (linkedElsewhere) {
+		return {
+			actions: [{ type: "notice", message: `Kept ${filename(claimedPdf)}: other notes still link to it.` }],
+			recheck: true,
+			pendingRemoved: claimedPdf,
+		};
+	}
+	return { actions: [{ type: "delete", path: claimedPdf }], recheck: false, pendingRemoved: null };
 }
 
 function decide(event: VaultEvent, snapshot: Snapshot): Reaction {
@@ -101,7 +110,9 @@ function decide(event: VaultEvent, snapshot: Snapshot): Reaction {
 			if (isPdf(event.path)) return reactToPdfRename(event.path, event.oldPath, event.local, snapshot);
 			return nothing();
 		case "delete":
-			return isNote(event.path) ? reactToNoteDelete(event.path, event.local, event.claimedPdf, snapshot) : nothing();
+			return isNote(event.path)
+				? reactToNoteDelete(event.path, event.local, event.claimedPdf, event.linkedElsewhere !== false, snapshot)
+				: nothing();
 		case "create":
 			return nothing();
 	}

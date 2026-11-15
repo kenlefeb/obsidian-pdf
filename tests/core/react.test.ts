@@ -120,9 +120,24 @@ test('renaming an unclaimed PDF or an unmarked note does nothing', () => {
 	expect(react({ kind: 'rename', path: 'a/New.md', oldPath: 'a/Old.md', local: true },
 		snap(['a/New.md'], ['a/Old.pdf'], []))).toEqual({ actions: [], recheck: true, pendingRemoved: null });
 });
-test('local delete of a healthy note deletes the PDF', () => {
-	expect(react({ kind: 'delete', path: 'a/S.md', local: true, claimedPdf: 'a/S.pdf' }, snap([], ['a/S.pdf'], [])))
+test('local delete of a healthy note deletes the PDF when no other note links to it', () => {
+	expect(react({ kind: 'delete', path: 'a/S.md', local: true, claimedPdf: 'a/S.pdf', linkedElsewhere: false }, snap([], ['a/S.pdf'], [])))
 		.toEqual({ actions: [{ type: 'delete', path: 'a/S.pdf' }], recheck: false, pendingRemoved: null });
+});
+test('local delete keeps a PDF other notes still link to: notice, listed, rechecked', () => {
+	expect(react({ kind: 'delete', path: 'a/S.md', local: true, claimedPdf: 'a/S.pdf', linkedElsewhere: true }, snap([], ['a/S.pdf'], [])))
+		.toEqual({
+			actions: [{ type: 'notice', message: 'Kept S.pdf: other notes still link to it.' }],
+			recheck: true, pendingRemoved: 'a/S.pdf' });
+});
+test('local delete keeps the PDF when nobody checked for other links', () => {
+	const r = react({ kind: 'delete', path: 'a/S.md', local: true, claimedPdf: 'a/S.pdf' }, snap([], ['a/S.pdf'], []));
+	expect(r.actions.some((a) => a.type === 'delete')).toBe(false);
+	expect(r.pendingRemoved).toBe('a/S.pdf');
+});
+test('non-local delete of a linked PDF is protected as before, without a notice', () => {
+	expect(react({ kind: 'delete', path: 'a/S.md', local: false, claimedPdf: 'a/S.pdf', linkedElsewhere: true }, snap([], ['a/S.pdf'], [])))
+		.toEqual({ actions: [], recheck: true, pendingRemoved: 'a/S.pdf' });
 });
 test('non-local delete protects the PDF', () => {
 	const r = react({ kind: 'delete', path: 'a/S.md', local: false, claimedPdf: 'a/S.pdf' }, snap([], ['a/S.pdf'], []));
