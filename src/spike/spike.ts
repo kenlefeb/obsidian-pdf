@@ -1,10 +1,12 @@
 // Throwaway spike code (plan task 5). Remove once the spike results are recorded.
-import { Modal, Notice, Platform, Setting, TFile, type App, type Plugin, type TAbstractFile } from "obsidian";
+import { FuzzySuggestModal, Modal, Notice, Platform, Setting, TFile, TFolder, type App, type Plugin, type TAbstractFile } from "obsidian";
 import { buildExplorerCss } from "../core/explorer-css.ts";
 import type { LocalIntent } from "../obsidian/local-intent.ts";
 
 const LOG_PREFIX = "pdf-wrapper-spike-log-";
 const DUMMY_FOLDER = "_pdf-wrapper-spike";
+/** The folder the owner creates for spike 2 (see the checklist). */
+const TEST_FOLDER = "Spike test";
 const DEVICE_ID_KEY = "pdf-wrapper-spike-device-id";
 const LOG_ON_KEY = "pdf-wrapper-spike-log-on";
 const HIDING_ON_KEY = "pdf-wrapper-spike-hiding-on";
@@ -14,15 +16,24 @@ const DUMMY_GRACE_MS = 3000;
 const DELETE_PAIR_MS = 5000;
 const FLUSH_DELAY_MS = 1000;
 
+const FIELDS = ["time", "device", "deviceId", "event", "path", "oldPath", "local", "newPathLocal", "size", "kind", "mtime"] as const;
+type Field = (typeof FIELDS)[number];
+
 const LOG_HEADER = [
 	"# PDF Wrapper spike log. One event per line. Fields are separated by a tab, in this order:",
-	"# time\tdevice\tdeviceId\tevent\tpath\toldPath\tlocal\tnewPathLocal\tpdfSize",
-	"# time: ISO 8601, UTC. device: desktop or mobile. deviceId: random id of this device.",
-	"# event: create, rename, delete (vault events), deleted (metadata cache), log-start (logging switched on or Obsidian started with logging on).",
-	"# oldPath: rename only. local: LocalIntent.consume(path); for rename, consume(oldPath).",
+	`# ${FIELDS.join("\t")}`,
+	"# time: ISO 8601, UTC. device: desktop or mobile. deviceId: random id of this device (per vault).",
+	"# event: create, rename, delete, modify (vault events; modify is logged for PDF files only), deleted (metadata cache),",
+	"#   log-start (logging switched on, or Obsidian started with logging on),",
+	"#   pair-rename (written just before the 'rename a test pair' command renames a note and then its PDF; path = new note path, oldPath = old note path),",
+	"#   snapshot-start / snapshot-vault / snapshot-adapter / snapshot-end (the 'snapshot test files' command; vault = what Obsidian's file list holds,",
+	"#   adapter = what vault.adapter.list and adapter.stat report on disk, including hidden files if the adapter lists them).",
+	"# oldPath: rename only. local: LocalIntent.consume(path); for rename, consume(oldPath). Not called for modify or snapshot lines.",
 	"# A delete and a deleted for the same path within 5 s share one local value, because the first call uses up the mark.",
-	"# newPathLocal: rename only, LocalIntent.consume(new path). pdfSize: stat.size in bytes of a PDF file (0 = empty file).",
-	"# '-' means not applicable.",
+	"# newPathLocal: rename only, LocalIntent.consume(new path).",
+	"# size: stat.size in bytes (0 = empty file); for create/rename/delete/modify only for PDF files; for snapshot lines every file.",
+	"# kind: file or folder (snapshot lines). mtime: modification time, ISO 8601 UTC (snapshot lines).",
+	"# '-' means not applicable or unknown.",
 	"",
 ].join("\n");
 
@@ -32,6 +43,8 @@ export function registerSpike(plugin: Plugin, localIntent: LocalIntent): void {
 	plugin.addCommand({ id: "spike-create-dummy-pairs", name: "Spike: create dummy pairs", callback: () => spike.promptDummyPairs() });
 	plugin.addCommand({ id: "spike-toggle-dummy-hiding", name: "Spike: toggle hiding of dummy PDF files", callback: () => spike.toggleHiding() });
 	plugin.addCommand({ id: "spike-remove-dummy-pairs", name: "Spike: remove dummy pairs", callback: () => void spike.removeDummyPairs() });
+	plugin.addCommand({ id: "spike-rename-test-pair", name: "Spike: rename a test pair", callback: () => spike.promptRenamePair() });
+	plugin.addCommand({ id: "spike-snapshot-test-files", name: "Spike: snapshot test files", callback: () => void spike.snapshot() });
 	plugin.app.workspace.onLayoutReady(() => spike.start());
 	plugin.register(() => spike.stop());
 }
@@ -68,8 +81,11 @@ class Spike {
 		this.plugin.registerEvent(vault.on("create", (file) => this.onEvent("create", file, "-")));
 		this.plugin.registerEvent(vault.on("rename", (file, oldPath) => this.onEvent("rename", file, oldPath)));
 		this.plugin.registerEvent(vault.on("delete", (file) => this.onEvent("delete", file, "-")));
+		this.plugin.registerEvent(vault.on("modify", (file) => {
+			if (isPdf(file)) this.onEvent("modify", file, "-");
+		}));
 		this.plugin.registerEvent(metadataCache.on("deleted", (file) => this.onEvent("deleted", file, "-")));
-		if (this.logOn) this.writeLine("log-start", "-", "-", "-", "-", "-");
+		if (this.logOn) this.writeLine({ event: "log-start" });
 		if (this.app.loadLocalStorage(HIDING_ON_KEY) === true) this.applyHiding();
 	}
 
@@ -82,7 +98,7 @@ class Spike {
 		this.logOn = !this.logOn;
 		this.app.saveLocalStorage(LOG_ON_KEY, this.logOn);
 		if (this.logOn) {
-			this.writeLine("log-start", "-", "-", "-", "-", "-");
+			this.writeLine({ event: "log-start" });
 			new Notice(`Spike event log is on. Writing to ${this.logPath}`);
 		} else {
 			void this.flush();
@@ -93,18 +109,18 @@ class Spike {
 	private onEvent(event: string, file: TAbstractFile, oldPath: string): void {
 		if (!this.logOn || this.isIgnored(file.path) || this.isIgnored(oldPath)) return;
 
-		let local: boolean;
+		let local = "-";
 		let newPathLocal = "-";
 		if (event === "rename") {
-			local = this.localIntent.consume(oldPath);
+			local = String(this.localIntent.consume(oldPath));
 			newPathLocal = String(this.localIntent.consume(file.path));
 		} else if (event === "delete" || event === "deleted") {
-			local = this.deleteLocal(event, file.path);
-		} else {
-			local = this.localIntent.consume(file.path);
+			local = String(this.deleteLocal(event, file.path));
+		} else if (event === "create") {
+			local = String(this.localIntent.consume(file.path));
 		}
-		const pdfSize = file instanceof TFile && file.extension.toLowerCase() === "pdf" ? String(file.stat.size) : "-";
-		this.writeLine(event, file.path, oldPath, String(local), newPathLocal, pdfSize);
+		const size = isPdf(file) ? String(file.stat.size) : "-";
+		this.writeLine({ event, path: file.path, oldPath, local, newPathLocal, size });
 	}
 
 	/** The vault `delete` and the metadata cache `deleted` for one note share a single consume. */
@@ -126,9 +142,10 @@ class Spike {
 		return inDummyFolder && (this.dummyBusy || Date.now() < this.dummyGraceUntil);
 	}
 
-	private writeLine(event: string, path: string, oldPath: string, local: string, newPathLocal: string, pdfSize: string): void {
-		const fields = [new Date().toISOString(), this.device, this.deviceId, event, path, oldPath, local, newPathLocal, pdfSize];
-		this.buffer.push(fields.map((field) => field.replace(/[\t\r\n]/g, " ")).join("\t"));
+	private writeLine(values: Partial<Record<Field, string>>): void {
+		const defaults: Partial<Record<Field, string>> = { time: new Date().toISOString(), device: this.device, deviceId: this.deviceId };
+		const fields = FIELDS.map((field) => (values[field] ?? defaults[field] ?? "-").replace(/[\t\r\n]/g, " "));
+		this.buffer.push(fields.join("\t"));
 		if (this.flushTimer === null) {
 			this.flushTimer = window.setTimeout(() => void this.flush(), FLUSH_DELAY_MS);
 		}
@@ -150,6 +167,93 @@ class Spike {
 			})
 			.catch((error: unknown) => console.error("PDF Wrapper spike: could not write the log", error));
 		return this.writing;
+	}
+
+	promptRenamePair(): void {
+		if (!this.logOn) {
+			new Notice("The spike event log is off. Turn it on first.");
+			return;
+		}
+		const pairs = this.testPairs();
+		if (pairs.length === 0) {
+			new Notice(`No note with a same-named PDF file in the ${TEST_FOLDER} folder.`);
+			return;
+		}
+		new PairSuggestModal(this.app, pairs, (pair) => void this.renamePair(pair)).open();
+	}
+
+	/** Notes under the test folder that have a PDF file of the same name next to them. */
+	private testPairs(): TestPair[] {
+		const pairs: TestPair[] = [];
+		for (const note of this.app.vault.getMarkdownFiles()) {
+			if (!note.path.startsWith(`${TEST_FOLDER}/`)) continue;
+			const pdf = this.app.vault.getFileByPath(`${parentPrefix(note)}${note.basename}.pdf`);
+			if (pdf) pairs.push({ note, pdf });
+		}
+		return pairs.sort((a, b) => a.note.path.localeCompare(b.note.path));
+	}
+
+	/** Renames the note and then its PDF back to back, the way the plugin will. */
+	private async renamePair({ note, pdf }: TestPair): Promise<void> {
+		const prefix = parentPrefix(note);
+		const oldBase = note.basename;
+		let newBase = `${oldBase} renamed`;
+		for (let n = 2; this.app.vault.getAbstractFileByPath(`${prefix}${newBase}.md`) || this.app.vault.getAbstractFileByPath(`${prefix}${newBase}.pdf`); n++) {
+			newBase = `${oldBase} renamed ${n}`;
+		}
+		const newNotePath = `${prefix}${newBase}.md`;
+		this.writeLine({ event: "pair-rename", path: newNotePath, oldPath: note.path });
+		try {
+			await this.app.fileManager.renameFile(note, newNotePath);
+			await this.app.fileManager.renameFile(pdf, `${prefix}${newBase}.pdf`);
+			new Notice(`Renamed the pair ${oldBase} to ${newBase}.`);
+		} catch (error) {
+			console.error("PDF Wrapper spike: could not rename the pair", error);
+			new Notice(`Could not rename the pair: ${error instanceof Error ? error.message : String(error)}`);
+		}
+	}
+
+	/**
+	 * Writes to the log what Obsidian's file list holds under the test folder, then what
+	 * the adapter lists on disk there. Runs whether or not the event log is on.
+	 */
+	async snapshot(): Promise<void> {
+		const { vault } = this.app;
+		this.writeLine({ event: "snapshot-start", path: TEST_FOLDER });
+		let count = 0;
+		for (const file of vault.getAllLoadedFiles()) {
+			if (file.path !== TEST_FOLDER && !file.path.startsWith(`${TEST_FOLDER}/`)) continue;
+			count++;
+			if (file instanceof TFolder) {
+				this.writeLine({ event: "snapshot-vault", path: file.path, kind: "folder" });
+			} else if (file instanceof TFile) {
+				this.writeLine({ event: "snapshot-vault", path: file.path, kind: "file", size: String(file.stat.size), mtime: isoTime(file.stat.mtime) });
+			}
+		}
+		try {
+			count += await this.snapshotAdapter(TEST_FOLDER);
+		} catch (error) {
+			this.writeLine({ event: "snapshot-adapter", path: TEST_FOLDER, kind: `error: ${error instanceof Error ? error.message : String(error)}` });
+		}
+		this.writeLine({ event: "snapshot-end", path: TEST_FOLDER });
+		await this.flush();
+		new Notice(`Snapshot written to ${this.logPath} (${count} lines).`);
+	}
+
+	private async snapshotAdapter(folder: string): Promise<number> {
+		const { adapter } = this.app.vault;
+		const listed = await adapter.list(folder);
+		let count = 0;
+		for (const path of listed.files) {
+			const stat = await adapter.stat(path);
+			this.writeLine({ event: "snapshot-adapter", path, kind: stat?.type ?? "file", size: stat ? String(stat.size) : "-", mtime: stat ? isoTime(stat.mtime) : "-" });
+			count++;
+		}
+		for (const path of listed.folders) {
+			this.writeLine({ event: "snapshot-adapter", path, kind: "folder" });
+			count += 1 + (await this.snapshotAdapter(path));
+		}
+		return count;
 	}
 
 	promptDummyPairs(): void {
@@ -236,6 +340,44 @@ class Spike {
 		if (!sheet) return;
 		document.adoptedStyleSheets = document.adoptedStyleSheets.filter((s) => s !== sheet);
 		this.sheet = null;
+	}
+}
+
+interface TestPair {
+	note: TFile;
+	pdf: TFile;
+}
+
+function isPdf(file: TAbstractFile): file is TFile {
+	return file instanceof TFile && file.extension.toLowerCase() === "pdf";
+}
+
+/** "folder/" for a file in a folder, "" for a file at the vault root. */
+function parentPrefix(file: TFile): string {
+	const parent = file.parent?.path ?? "/";
+	return parent === "/" ? "" : `${parent}/`;
+}
+
+function isoTime(ms: number): string {
+	return Number.isFinite(ms) ? new Date(ms).toISOString() : "-";
+}
+
+class PairSuggestModal extends FuzzySuggestModal<TestPair> {
+	constructor(app: App, private readonly pairs: TestPair[], private readonly onChoose: (pair: TestPair) => void) {
+		super(app);
+		this.setPlaceholder("Choose the pair to rename");
+	}
+
+	getItems(): TestPair[] {
+		return this.pairs;
+	}
+
+	getItemText(pair: TestPair): string {
+		return pair.note.path;
+	}
+
+	onChooseItem(pair: TestPair): void {
+		this.onChoose(pair);
 	}
 }
 

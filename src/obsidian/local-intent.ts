@@ -23,10 +23,21 @@ export class LocalIntent {
 	/** Wraps `Vault.rename`, `Vault.trash` and `Vault.delete`. Returns the uninstaller. */
 	install(): () => void {
 		const track = <T>(file: TAbstractFile, run: () => Promise<T>): Promise<T> => {
+			const path = file.path;
 			const mark = this.mark(file);
-			return run().catch((error: unknown) => {
-				// The change did not happen, so the path is not being changed locally.
-				if (this.marks.get(file.path) === mark) this.marks.delete(file.path);
+			// If the call fails, the change did not happen, so the path is not being changed locally.
+			const unmark = () => {
+				if (this.marks.get(path) === mark) this.marks.delete(path);
+			};
+			let pending: Promise<T>;
+			try {
+				pending = run();
+			} catch (error) {
+				unmark();
+				throw error;
+			}
+			return pending.catch((error: unknown) => {
+				unmark();
 				throw error;
 			});
 		};

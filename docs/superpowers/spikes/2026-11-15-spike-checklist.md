@@ -13,7 +13,7 @@ what you saw in the notes, and send back the log files (see "Sending the
 results"). Where a step says "write down the time", the hour and minute is
 enough.
 
-The build adds four commands. Open the command palette (on the Mac press
+The build adds six commands. Open the command palette (on the Mac press
 `Cmd+P`; on the phone, swipe down on a note or tap the command button in the
 toolbar) and type `spike` to find them. Each shows as
 `PDF Wrapper: Spike: …`:
@@ -24,6 +24,8 @@ toolbar) and type `spike` to find them. Each shows as
 | Spike: create dummy pairs | Asks for a number, then creates that many pairs `Doc 1.md` + `Doc 1.pdf`, `Doc 2.md` + `Doc 2.pdf`, … in a folder `_pdf-wrapper-spike` at the vault root. The PDFs are empty files. Pairs that already exist are kept. |
 | Spike: toggle hiding of dummy PDF files | Hides the dummy PDFs in the file explorer and adds a small "PDF" label after each dummy note. Run it again to show them. It stays on after a restart until you switch it off. |
 | Spike: remove dummy pairs | Deletes the whole `_pdf-wrapper-spike` folder. |
+| Spike: rename a test pair | Lists the notes in the `Spike test` folder that have a PDF of the same name next to them. Pick one, and it renames the note and then its PDF straight away, to `… renamed`, the way the finished plugin will. Works only while the event log is on. |
+| Spike: snapshot test files | Writes into the log a list of every file in the `Spike test` folder, with its size and time, as Obsidian sees it and as the disk shows it. Works whether or not the event log is on. |
 
 ## Before you start
 
@@ -52,6 +54,9 @@ Also check, in each test vault, Settings → Files and links → "Deleted files"
 Whatever it says is where this build's deletes go.
 
 - [ ] Deleted files setting: ____
+- [ ] Obsidian version on the Mac (Settings → General, "Current version", and
+  the "Installer version" shown there): ____
+- [ ] Obsidian version on the phone (Settings → General): ____
 
 ## Installing the build
 
@@ -85,7 +90,7 @@ On the phone, for **each** test vault:
   Check that **PDF Wrapper** is listed under "Installed plugins" and switched
   on. If it is listed but off, switch it on. If it is not listed, wait a few
   minutes for sync and restart Obsidian again.
-- [ ] Open the command palette and type `spike`. All four commands should
+- [ ] Open the command palette and type `spike`. All six commands should
   appear. If they do not, the phone does not have this build yet.
   Notes: ____
 
@@ -122,10 +127,9 @@ sync to the other device; that is expected.
 
 ### On the phone
 
-Wait until the Mac's dummy files have synced to the phone (the
-`_pdf-wrapper-spike` folder appears on the phone). If you want to start before
-they all arrive, run "Spike: create dummy pairs" on the phone with the same
-number: it only adds the pairs that are missing.
+Wait until all of the Mac's dummy files have synced to the phone (the
+`_pdf-wrapper-spike` folder on the phone holds as many `Doc …` notes as on
+the Mac). Do not create dummy pairs on the phone.
 
 - [ ] With 300 pairs (if the 3000 have already arrived, use 3000 and skip the
   300 rows): run "Spike: toggle hiding of dummy PDF files", open the file
@@ -154,10 +158,23 @@ both devices open on the same vault the whole time.
 
 ### Set up (each vault)
 
+Arrival times only count if both devices are awake and Obsidian is running
+on them. For the whole of spike 2:
+
+- [ ] On the phone, Settings → Display & Brightness → Auto-Lock → **Never**.
+  Keep Obsidian open in the foreground on the phone the whole time, with the
+  phone on a charger. (You will set Auto-Lock back at the end.)
+  Auto-Lock was: ____
+- [ ] On the Mac, keep Obsidian open and stop the Mac from sleeping (for
+  example, plug it in and in System Settings → Displays / Lock Screen set the
+  display to stay on for the length of the test).
+- [ ] Both devices set their clock automatically. On the phone: Settings →
+  General → Date & Time → "Set Automatically" is on. On the Mac: System
+  Settings → General → Date & Time → "Set time and date automatically" is on.
 - [ ] Make sure the dummy pairs from spike 1 are gone from this vault.
 - [ ] Find two or three small real PDFs (for example, on the Mac, File →
   Print → PDF → Save as PDF from any web page).
-- [ ] On the Mac, in Obsidian, create a folder `Spike test` with:
+- [ ] On the Mac, in Obsidian, create a folder named exactly `Spike test` at the vault root, with:
   - notes `A.md`, `B.md`, and PDFs `A.pdf`, `B.pdf` (drag the PDFs into the
     folder in Obsidian);
   - a subfolder `Folder 1` holding `C.md` and `C.pdf`;
@@ -180,9 +197,13 @@ the change arrived.
   Time: ____ Seen on phone: ____
 - [ ] Rename PDF `A.pdf` to `A renamed.pdf`.
   Time: ____ Seen on phone: ____
-- [ ] Move note `B.md` into `Other` (drag it in the file explorer).
+- [ ] Rename a note and its PDF together: run "Spike: rename a test pair" and
+  pick `Spike test/B.md`. Both become `B renamed`. On the phone, watch for the
+  note and the PDF to change, and write down when each did.
+  Time: ____ Note seen on phone: ____ PDF seen on phone: ____
+- [ ] Move note `B renamed.md` into `Other` (drag it in the file explorer).
   Time: ____ Seen on phone: ____
-- [ ] Move PDF `B.pdf` into `Other`.
+- [ ] Move PDF `B renamed.pdf` into `Other`.
   Time: ____ Seen on phone: ____
 - [ ] Move the folder `Folder 1` into `Other`.
   Time: ____ Seen on phone: ____
@@ -193,14 +214,18 @@ the change arrived.
 
 ### In Obsidian on the phone
 
-First, on the Mac in Obsidian, add a fresh `D.md` and `D.pdf` to `Spike test`,
-and wait until they reach the phone. Then, on the phone (long-press a file or
+First, on the Mac in Obsidian, add a fresh `D.md` and `D.pdf`, and a fresh
+`G.md` and `G.pdf`, to `Spike test`, and wait until they reach the phone. Then, on the phone (long-press a file or
 folder in the file explorer for Rename, Move and Delete):
 
 - [ ] Rename note `D.md` to `D renamed`.
   Time: ____ Seen on Mac: ____
 - [ ] Rename PDF `D.pdf` to `D renamed.pdf`.
   Time: ____ Seen on Mac: ____
+- [ ] Rename a note and its PDF together: run "Spike: rename a test pair" and
+  pick `Spike test/G.md`. Both become `G renamed`. On the Mac, write down when
+  the note and the PDF each changed.
+  Time: ____ Note seen on Mac: ____ PDF seen on Mac: ____
 - [ ] Move note `D renamed.md` into `Other`.
   Time: ____ Seen on Mac: ____
 - [ ] Move PDF `D renamed.pdf` into `Other`.
@@ -214,13 +239,17 @@ folder in the file explorer for Rename, Move and Delete):
 
 ### In Finder on the Mac (Obsidian stays open on both devices)
 
-First, in Obsidian, add `E.md` and `E.pdf` to `Spike test`. Then, in Finder,
-in the vault folder:
+First, in Obsidian, add `E.md` and `E.pdf`, and `H.md` and `H.pdf`, to
+`Spike test`. Then, in Finder, in the vault folder:
 
 - [ ] Rename `E.md` to `E renamed.md`.
   Time: ____ Seen on phone: ____
 - [ ] Rename `E.pdf` to `E renamed.pdf`.
   Time: ____ Seen on phone: ____
+- [ ] Rename a note and its PDF together, **without waiting in between**:
+  rename `H.md` to `H renamed.md`, then straight away (within a few seconds)
+  rename `H.pdf` to `H renamed.pdf`.
+  Time: ____ Note seen on phone: ____ PDF seen on phone: ____
 - [ ] Move `E renamed.md` into `Other`.
   Time: ____ Seen on phone: ____
 - [ ] Move `E renamed.pdf` into `Other`.
@@ -257,16 +286,32 @@ was added and when it showed on the other device.
 
 ### PDFs not yet downloaded (iCloud vault only)
 
-- [ ] On the Mac, in Finder, right-click one PDF in `Spike test` and choose
-  "Remove Download". Wait a minute, then open the PDF in Obsidian on the Mac.
-  Time: ____ What happened: ____
-- [ ] On the phone, did any newly added PDF look empty or fail to open before
-  it had fully downloaded? Notes: ____
+Removing a download does not rename, move or delete anything, so the log only
+sees it through "Spike: snapshot test files". Run the snapshot exactly where
+the steps say.
+
+- [ ] On the Mac, run "Spike: snapshot test files". Time: ____
+- [ ] In Finder, right-click one PDF in `Spike test` (for example `C.pdf`
+  wherever it is now) and choose "Remove Download". Which PDF: ____
+  Time: ____
+- [ ] Wait a minute, then on the Mac run "Spike: snapshot test files" again,
+  **before** opening anything. Time: ____
+- [ ] Open that PDF in Obsidian on the Mac. What happened: ____
+- [ ] Run "Spike: snapshot test files" once more. Time: ____
+- [ ] Now the phone. On the Mac, drag one more PDF (a large one if you have
+  it, several MB) into `Spike test` in Obsidian. As soon as it shows on the
+  phone, run "Spike: snapshot test files" on the phone, then again every 15
+  seconds or so, three or four times, then once more after it opens properly.
+  Times: ____
+- [ ] On the phone, did the new PDF look empty or fail to open before it had
+  fully downloaded? Notes: ____
 
 ### Finish this vault
 
 - [ ] Wait two minutes so the last changes sync, then run "Spike: toggle event
   log" on both devices. It should say the log is off.
+- [ ] Set the phone's Auto-Lock back to what it was, and let the Mac sleep
+  normally again.
 - [ ] Anything else you noticed: ____
 
 ## Sending the results
@@ -290,8 +335,9 @@ vault each came from, and send this checklist with your ticks and notes.
 You do not need to work these out; they are listed so you know what the test
 is for.
 
-1. Is every in-app action, on the Mac and on the phone, logged as
-   `local=true`?
+1. Is every in-app rename, move or delete, on the Mac and on the phone, logged
+   as `local=true`? (Adding a file is never marked, so creates always show
+   `local=false`.)
 2. Is any change made in Finder, or delivered by sync, logged as `local=true`
    (Obsidian Sync especially)?
 3. Does a rename made on one device arrive on the other as a rename or as a
@@ -301,5 +347,9 @@ is for.
    device reach the second?
 
 The spec also asks what a not-yet-downloaded iCloud PDF looks like to the
-plugin; the log records each PDF's size (`0` means an empty file) and the
-"PDFs not yet downloaded" steps above give that evidence.
+plugin. The log can show only part of that: the snapshot lines record, before
+and after "Remove Download" and while a PDF arrives on the phone, the size and
+time Obsidian holds for each file and what the disk lists (including hidden
+iCloud placeholder files, if the disk listing shows them), and the log records
+any change of a PDF's size that Obsidian reports. Whether the PDF opened, and
+what it looked like, comes from your notes in that section.
