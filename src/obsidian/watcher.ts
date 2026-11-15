@@ -122,7 +122,10 @@ export class Watcher {
 
 	private onRename(file: TAbstractFile, oldPath: string): void {
 		// A folder's children fire their own renames.
-		if (!(file instanceof TFile) || this.isOwn(oldPath)) return;
+		if (!(file instanceof TFile)) return;
+		// A note created moments ago has left that path: a note sync puts there later is not that create.
+		this.pendingCreates.forget(oldPath);
+		if (this.isOwn(oldPath)) return;
 		// A PDF that reaches its final name from a non-PDF one (a download's temporary name) is an arrival from outside.
 		if (isPdf(file.path) && !isPdf(oldPath)) this.deps.onPdfCreated(file.path, false);
 		const local = this.deps.localIntent.consume(oldPath) && this.deps.getSettings().followRenames;
@@ -131,10 +134,25 @@ export class Watcher {
 
 	private onCreate(file: TAbstractFile): void {
 		if (!(file instanceof TFile) || this.isOwn(file.path)) return;
+		if (isNote(file.path)) {
+			this.onNoteCreated(file.path);
+			return;
+		}
+		// A PDF's `local` only sets automatic wrapping's settle time; it does not depend on any follow setting.
 		const local = this.deps.localIntent.consume(file.path);
 		if (isPdf(file.path)) this.deps.onPdfCreated(file.path, local);
-		if (local && isNote(file.path)) this.pendingCreates.add(file.path);
 		this.enqueue({ kind: "create", path: file.path, local });
+	}
+
+	/**
+	 * A new note may be an in-app copy of a wrapped note, which `react` follows by copying the PDF. That counts as
+	 * local only with a file mark of its own (a folder mark covers whatever sync puts in that folder meanwhile) and
+	 * only while "Rename and move the PDF with its note" is on. The mark is used up either way.
+	 */
+	private onNoteCreated(path: string): void {
+		const local = this.deps.localIntent.consumeFileMark(path) && this.deps.getSettings().followRenames;
+		if (local) this.pendingCreates.add(path);
+		this.enqueue({ kind: "create", path, local });
 	}
 
 	/**
@@ -154,7 +172,10 @@ export class Watcher {
 	}
 
 	private onNoteDeleted(file: TFile, prevCache: CachedMetadata | null): void {
-		if (!isNote(file.path) || this.isOwn(file.path)) return;
+		if (!isNote(file.path)) return;
+		// A note created moments ago is gone: a note sync puts at that path later is not that create.
+		this.pendingCreates.forget(file.path);
+		if (this.isOwn(file.path)) return;
 		const local = this.deps.localIntent.consume(file.path) && this.deps.getSettings().followDeletes;
 		this.enqueue({ kind: "delete", path: file.path, local, claimedPdf: this.previousClaim(file.path, prevCache) });
 	}

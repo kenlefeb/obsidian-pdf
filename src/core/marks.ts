@@ -25,10 +25,7 @@ class Marks {
 
 	/** True if `path` is marked or lies inside a marked folder. Uses up an exact file mark when `useUp`. */
 	check(path: string, useUp: boolean): boolean {
-		const now = this.now();
-		for (const [markedPath, mark] of this.marks) {
-			if (mark.expires <= now) this.marks.delete(markedPath);
-		}
+		this.dropExpired();
 		const exact = this.marks.get(path);
 		if (exact) {
 			if (useUp && !exact.folder) this.marks.delete(path);
@@ -38,6 +35,22 @@ class Marks {
 			if (mark.folder && path.startsWith(`${markedPath}/`)) return true;
 		}
 		return false;
+	}
+
+	/** True, once, if `path` has a file mark of its own. A folder mark covering it does not count and is left as it is. */
+	checkFile(path: string): boolean {
+		this.dropExpired();
+		const exact = this.marks.get(path);
+		if (!exact || exact.folder) return false;
+		this.marks.delete(path);
+		return true;
+	}
+
+	private dropExpired(): void {
+		const now = this.now();
+		for (const [markedPath, mark] of this.marks) {
+			if (mark.expires <= now) this.marks.delete(markedPath);
+		}
 	}
 }
 
@@ -101,6 +114,11 @@ export class PendingCreates {
 		return pending;
 	}
 
+	/** Drops `path`, for example because the note there was deleted or renamed away. */
+	forget(path: string): void {
+		this.expiries.delete(path);
+	}
+
 	clear(): void {
 		this.expiries.clear();
 	}
@@ -124,5 +142,14 @@ export class IntentMarks {
 
 	consume(path: string): boolean {
 		return this.marks.check(path, true);
+	}
+
+	/**
+	 * True, once, if `path` itself was marked as a file. Unlike `consume`, a folder mark covering `path` does not
+	 * count: a folder rename or delete marks everything inside it, and a note that sync creates there meanwhile must
+	 * not read as an in-app copy.
+	 */
+	consumeFileMark(path: string): boolean {
+		return this.marks.checkFile(path);
 	}
 }

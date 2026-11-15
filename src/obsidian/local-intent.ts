@@ -113,6 +113,14 @@ export class LocalIntent {
 		return this.marks.consume(path);
 	}
 
+	/**
+	 * True, once, if `path` itself was marked as a file within the last 5000 ms (by `create`, `createBinary` or a file
+	 * `copy`). A folder mark covering `path` does not count and is not used up.
+	 */
+	consumeFileMark(path: string): boolean {
+		return this.marks.consumeFileMark(path);
+	}
+
 	/** Resolves once no wrapped call is running (at once when none is). Never rejects. */
 	async whenIdle(): Promise<void> {
 		while (this.inFlight.size > 0) {

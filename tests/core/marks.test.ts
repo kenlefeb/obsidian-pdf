@@ -124,3 +124,42 @@ test("pending creates: adding again restarts the expiry; clear forgets everythin
 	expect(pending.consume("a.md")).toBe(false);
 	expect(pending.consume("b.md")).toBe(false);
 });
+
+test("intent: consumeFileMark answers only for a path's own file mark, and uses it up", () => {
+	const marks = new IntentMarks(clock().now);
+	marks.mark("n.md", false);
+	expect(marks.consumeFileMark("n.md")).toBe(true);
+	expect(marks.consumeFileMark("n.md")).toBe(false);
+	expect(marks.consume("n.md")).toBe(false);
+	expect(marks.consumeFileMark("other.md")).toBe(false);
+});
+
+test("intent: consumeFileMark is false for a path covered only by a folder mark, and leaves the folder mark", () => {
+	const marks = new IntentMarks(clock().now);
+	marks.mark("F", true);
+	expect(marks.consumeFileMark("F/a.md")).toBe(false);
+	expect(marks.consumeFileMark("F")).toBe(false);
+	expect(marks.consume("F/a.md")).toBe(true);
+	// A file mark inside a marked folder still counts as the file's own.
+	marks.mark("F/b.md", false);
+	expect(marks.consumeFileMark("F/b.md")).toBe(true);
+});
+
+test("intent: consumeFileMark ignores an expired file mark", () => {
+	const c = clock();
+	const marks = new IntentMarks(c.now);
+	marks.mark("n.md", false);
+	c.advance(MARK_TTL_MS);
+	expect(marks.consumeFileMark("n.md")).toBe(false);
+});
+
+test("pending creates: forget drops an entry, so a later note at that path is not taken for it", () => {
+	const pending = new PendingCreates(clock().now);
+	pending.add("a/S 1.md");
+	pending.add("a/T.md");
+	pending.forget("a/S 1.md");
+	pending.forget("missing.md");
+	expect(pending.has("a/S 1.md")).toBe(false);
+	expect(pending.consume("a/S 1.md")).toBe(false);
+	expect(pending.has("a/T.md")).toBe(true);
+});

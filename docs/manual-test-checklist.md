@@ -92,6 +92,7 @@ note" on (the defaults), on desktop and on a phone.
 - [ ] Delete only the PDF of a pair: the note stays.
 - [ ] Turn "Delete the PDF when its note is deleted in Obsidian" off, delete a wrapped note in Obsidian: the PDF stays and is listed with "Its note was deleted; the PDF was kept".
 - [ ] Turn "Rename and move the PDF with its note" off, rename a wrapped note in Obsidian: the PDF is not renamed.
+- [ ] With "Rename and move the PDF with its note" off, copy a wrapped note with Obsidian's own copy action: only the note is copied, no PDF appears, and the copy is listed with "Points at another document's PDF".
 - [ ] Unwrap a document by deleting its `wrapped-pdf` property in the properties panel (no rename, create or delete): within a couple of seconds the PDF's row reappears in the file explorer and the note loses its "PDF" marker. Add the property back (or undo): the row is hidden again within a couple of seconds. Typing in the body of a wrapped note causes no visible refresh or flicker.
 
 ### Assumptions about Obsidian the code relies on (unverified; confirm each)
@@ -205,6 +206,7 @@ Run with the plugin enabled on two devices (including a phone) sharing the vault
 Obsidian Sync, both "follow" settings on.
 
 - [ ] Rename a wrapped note on device A. Device B receives the renamed note and PDF through sync and does not rename, move or delete anything itself: after sync settles there is exactly one note and one PDF, no duplicate or conflicting files, and the pair is healthy on both devices (or, if it arrives piecemeal, briefly listed and then clear after the check). Repeat renaming the PDF on A, and moving the note to another folder.
+- [ ] Copy a wrapped note with Obsidian's own copy action on device A (its PDF is copied there). On device B, once sync has delivered both copies, no extra PDF and no conflict file appear, and the copy is healthy on both devices.
 - [ ] Delete a wrapped note on device A: the PDF is gone on both devices once, and device B does not report an error or trash anything it did not need to. Device B never deletes a PDF because of a note that arrived or vanished by sync.
 - [ ] Obsidian Sync and iCloud apply remote renames and deletes without going through `Vault.rename`, `Vault.trash` or `Vault.delete` (otherwise a receiving device would act on them; the two follow settings are the remedy). Record, per sync service, whether device B ever acted on a remote change.
 - [ ] With two devices both on, add a PDF on one: exactly one note results, on both devices. Record how long the second device waited before it wrapped. Expected: 15 to 30 seconds. A wait of about 2 seconds means sync delivered the PDF through a path the plugin reads as in-app, so the cross-device margin is gone: report it. Also note whether it ever wrapped the PDF itself. Repeat with the PDF saved into iCloud from a third app so both see it from outside at the same moment; repeat 5 times and count duplicate notes.

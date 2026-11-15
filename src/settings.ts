@@ -106,7 +106,7 @@ export class PdfWrapperSettingTab extends PluginSettingTab {
 
 		new Setting(containerEl)
 			.setName('Rename and move the PDF with its note')
-			.setDesc('When on, renaming or moving a wrapped note or its PDF inside Obsidian on this device does the same to its partner. This relies on the same detection. If you see duplicated or conflicting files after renames, turn this off: the pair is then listed for you to fix with one click.')
+			.setDesc('When on, renaming, moving or copying a wrapped note inside Obsidian on this device does the same to its PDF, and renaming or moving the PDF does the same to its note. This relies on the same detection. If you see duplicated or conflicting files after renames or copies, turn this off: the pair is then listed for you to fix with one click.')
 			.addToggle(toggle => toggle
 				.setValue(this.plugin.settings.followRenames)
 				.onChange(async (value) => {

@@ -59,7 +59,7 @@ Other cases:
 - Deleting only the PDF leaves the note. It is then listed as missing its PDF.
 - Deleting a note whose pair is already broken does nothing to any PDF.
 - If the partner cannot follow (for example the new name is already taken), your action stands, a notice says so, and the pair is listed.
-- Copying a note outside Obsidian (for example in Finder, or a copy that arrives through sync) is not acted on: it makes a second note pointing at the first note's PDF, which is listed with a fix that copies the PDF for it.
+- Copying a note outside Obsidian (for example in Finder, or a copy that arrives through sync) is meant not to be acted on: it makes a second note pointing at the first note's PDF, which is listed with a fix that copies the PDF for it.
 
 **Deleting follows your Obsidian setting.** The PDF is deleted the same way the note was: system trash, vault `.trash` folder, or permanent deletion, according to Settings, Files and links, Deleted files. If that is set to permanent deletion, the PDF is permanently deleted.
 
@@ -113,7 +113,7 @@ Limits:
 | **Wrap new PDFs automatically** | off | See [Automatic wrapping](#automatic-wrapping). This device only. |
 | **Hide paired PDF files in the file explorer** | on | See above. |
 | **Delete the PDF when its note is deleted in Obsidian** | on | Turn off to never have a PDF deleted automatically; it is kept and listed instead. The "Delete the PDF" fix in the list still deletes, after you confirm. |
-| **Rename and move the PDF with its note** | on | Turn off to stop renames and moves from following; the pair is listed instead. |
+| **Rename and move the PDF with its note** | on | Turn off to stop renames, moves and in-app copies of a wrapped note from following; the pair (or the copy) is listed instead. |
 
 ## Templates
 
@@ -143,19 +143,20 @@ The plugin no longer reads or writes the `attachment` / `attachments` properties
 
 ### What following relies on, and how it could go wrong
 
-Following renames, moves and deletes relies on the plugin telling a change you made inside Obsidian on this device apart from one made in Finder or delivered by sync. It does this by noting the changes that go through Obsidian's own file methods.
+Following renames, moves, copies and deletes relies on the plugin telling a change you made inside Obsidian on this device apart from one made in Finder or delivered by sync. It does this by noting the changes that go through Obsidian's own file methods.
 
 **This has not been verified on any sync setup**, including iCloud and Obsidian Sync. If it misfires, you could see:
 
-- a duplicated or conflicting file after a rename, or
+- a duplicated or conflicting file after a rename,
+- an unexpected copy of a PDF, or a sync conflict copy, after a note was copied on another device, or
 - a PDF moved to the trash (or deleted) when its note was not deleted by you.
 
 If you see either, turn off:
 
 - **Delete the PDF when its note is deleted in Obsidian**, and
-- **Rename and move the PDF with its note**.
+- **Rename and move the PDF with its note** (it also covers copying a wrapped note).
 
-With both off, the plugin is designed to rename, move or delete files only when you click a fix or run a command. Broken pairs are listed with one-click fixes instead.
+With both off, the plugin is designed to rename, move, copy or delete files only when you click a fix or run a command. Broken pairs are listed with one-click fixes instead.
 
 ## Known limits
 

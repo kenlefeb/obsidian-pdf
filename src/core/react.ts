@@ -14,10 +14,13 @@ function partnerDestination(anchor: string, partner: string): string {
 	return joinPath(dirname(anchor), `${basename(anchor)}.${ownExtension(partner)}`);
 }
 
-/** Free means in neither list ignoring letter case; the partner's own current path does not count against itself. */
-function isFree(path: string, partner: string, snapshot: Snapshot): boolean {
+/**
+ * Free means in neither list ignoring letter case. `exempt` (the partner being renamed) does not count against
+ * itself; null exempts nothing.
+ */
+function isFree(path: string, exempt: string | null, snapshot: Snapshot): boolean {
 	const wanted = path.toLowerCase();
-	return ![...snapshot.pdfPaths, ...snapshot.notePaths].some((p) => p !== partner && p.toLowerCase() === wanted);
+	return ![...snapshot.pdfPaths, ...snapshot.notePaths].some((p) => p !== exempt && p.toLowerCase() === wanted);
 }
 
 /**
@@ -115,7 +118,7 @@ function reactToNoteCreate(path: string, local: boolean, snapshot: Snapshot): Re
 	if (pdf === null || samePair(path, pdf)) return nothing();
 	if (!snapshot.claims.some((c) => c.notePath !== path && c.pdfPath === pdf && samePair(c.notePath, pdf))) return nothing();
 	const to = partnerDestination(path, pdf);
-	if (!isFree(to, path, snapshot)) {
+	if (!isFree(to, null, snapshot)) {
 		const message = `Copied ${filename(path)}, but could not copy its PDF: a file named ${filename(to)} already exists. `
 			+ "The copy is listed under documents needing attention.";
 		return { actions: [{ type: "notice", message }], recheck: true, pendingRemoved: null };
