@@ -1,7 +1,7 @@
 # Paired PDF documents — design
 
 Date: 2026-11-15
-Status: awaiting approval
+Status: awaiting approval (revision 3)
 
 ## Intent
 
@@ -19,20 +19,25 @@ Today the plugin does one thing: a "Wrap PDF" action that moves a PDF to the
 attachment folder and creates a note from a template. That becomes the entry
 point to the new behaviour; everything else here is new.
 
+Later, the owner intends to fill frontmatter from the PDF's own contents. That
+is not part of this work, but wrapping should be one clear step that such
+extraction can later plug into.
+
 ## Goals
 
 1. A wrapped document is laid out as a note and a PDF **side by side: same
    folder, same base name** (`Statement.md` + `Statement.pdf`).
-2. Rename, move, delete and duplicate apply to both files.
+2. Rename, move, delete and duplicate done inside Obsidian apply to both
+   files.
 3. Changes made outside Obsidian (Finder, sync, scripts), including while
-   Obsidian was closed, are detected. Changes Obsidian sees happen are
-   followed automatically; breaks found afterwards are listed with one-click
-   fixes.
-4. It is safe on every device the owner uses, desktop and mobile, with vaults
+   Obsidian was closed, are detected and listed with one-click fixes. The PDF
+   is protected until the user decides.
+4. Optionally, every PDF added to the vault is wrapped automatically.
+5. It is safe on every device the owner uses, desktop and mobile, with vaults
    synced by iCloud and by Obsidian Sync, and the plugin running on all of
    them at once.
-5. In the core file explorer the pair looks like one file.
-6. The vault stays plain files that are fully usable without the plugin.
+6. In the core file explorer the pair looks like one file.
+7. The vault stays plain files that are fully usable without the plugin.
 
 ## Non-goals
 
@@ -41,6 +46,7 @@ point to the new behaviour; everything else here is new.
   separate one-time migration outside the plugin, which moves each PDF beside
   its note and adds the marker property defined below. The plugin ignores
   those notes until then.
+- Extracting frontmatter from PDF contents (future work; see Intent).
 - More than one PDF, or other file types, per document.
 - A custom container or archive file type. Rejected: Obsidian only indexes
   `.md`, so frontmatter inside a container would not be queryable.
@@ -50,22 +56,23 @@ point to the new behaviour; everything else here is new.
   search, graph, third-party explorers).
 - Redirecting "open the PDF" to open the note.
 - A Finder extension or any companion app.
-- Multi-select / batch wrapping.
+- Multi-select / batch wrapping from the file menu.
 
 ## Anti-goals
 
 These would make the result a failure even if it technically works:
 
-- **Losing a file.** The plugin must never permanently delete anything, and
-  must never delete as a result of a scan.
-- **A second source of truth.** No registry, index or cache that can disagree
-  with what is on disk.
+- **Losing a file the user did not mean to delete.** The plugin deletes a PDF
+  only as part of a delete the user performed inside Obsidian on this device.
+  It never deletes because of a scan, a sync-delivered change, or anything
+  done outside Obsidian.
+- **A second source of truth for pairs.** No registry, index or cache of pairs
+  that can disagree with what is on disk.
 - **Breaking when the cosmetics break.** If an Obsidian update defeats the
   explorer hiding, pairing and syncing must be unaffected; the user just sees
   two files.
-- **Depending on Obsidian internals for correctness.** Undocumented APIs are
-  acceptable only where already used (Templater, core Templates options) and
-  never for the explorer.
+- **Depending on file-explorer internals.** The explorer is touched by styling
+  rules only.
 
 ## Constraints
 
@@ -110,18 +117,42 @@ The owner chose 2 after that research.
 
 The owner chose 1. A registry can be added later without changing the layout.
 
+## The governing rule
+
+Decided by the owner for deletes, and extended by the designer to every
+operation *(call)*:
+
+> **The plugin acts on its own only in response to something the user did
+> inside Obsidian on this device. Everything else — changes made in Finder,
+> delivered by sync, or made while Obsidian or the plugin was not running —
+> it protects and lists, and the user makes the call.**
+
+The owner's reasoning for deletes: a user who deletes a wrapped note in
+Obsidian believes they are deleting the document, so the PDF should go with
+it, with no quarantine. A note that vanishes any other way is not evidence of
+that intent.
+
+Extending the rule to renames and moves also removes the multi-device race:
+a device that merely *receives* a rename through sync never acts on it, so two
+devices cannot both rename the same PDF.
+
+This rule depends on telling a local action from everything else. See "Local
+intent" under Technical notes; it is the main thing spike 2 must confirm. If a
+change cannot be positively identified as local, it is treated as not local.
+
 ## Definitions
 
 Everything below marked *(call)* is the designer's decision, not something the
-owner specified. The owner saw a summary of the behaviour table and raised no
-objection, but has not confirmed details.
+owner specified.
 
-**Claim.** A note *claims* a PDF when its frontmatter has the plugin's own
-marker property, `wrapped-pdf`, holding a single link to a `.pdf` file. The
-owner asked for a dedicated property so that notes the plugin did not wrap are
-never touched; the name `wrapped-pdf` is the designer's *(call)* and is fixed,
-not a setting. Notes without the property are invisible to the plugin,
-whatever else they link to.
+**Marker property.** The frontmatter property that marks a note as wrapping a
+PDF. Its name is a setting (owner's decision); the default is `wrapped-pdf`
+*(call)*. This document uses the default name.
+
+**Claim.** A note *claims* a PDF when its marker property holds a single link
+to a `.pdf` file. Notes without the property are invisible to the plugin,
+whatever else they link to. The owner asked for a dedicated property so that
+notes the plugin did not wrap are never touched.
 
 The plugin no longer reads or writes `attachment` / `attachments`. The owner
 usually keeps an `attachments` list; a template can still include the PDF
@@ -144,10 +175,10 @@ A healthy pair stays healthy when other notes also claim its PDF: the
 name-matching note owns the PDF, keeps its hidden row, and keeps following
 renames. Only the other claimants are flagged. *(call)*
 
-A PDF with no claimant is simply an unwrapped PDF. It is never flagged; the
-plugin has no way to know it was once wrapped, by design.
+**Unwrapped PDF.** A PDF no note claims. The files alone cannot say whether it
+was once wrapped. See "Unwrapped PDFs" below for when these are listed.
 
-**Canonical form.** In a healthy pair the `wrapped-pdf` value is written as
+**Canonical form.** In a healthy pair the marker value is written as
 `[[<vault path to pdf>|<pdf file name>]]` (the format the plugin writes
 today), and any embed of the PDF in the note body points at the same path.
 The plugin rewrites the claim and embed to canonical form whenever it repairs
@@ -164,74 +195,86 @@ the active PDF *(call)*.
   no longer moves.** The attachment-folder logic is removed.
 - Template handling is unchanged: Templater if present, otherwise the core
   Templates placeholders (`{{title}}`, `{{date}}`, `{{time}}`).
-- The plugin always sets `wrapped-pdf` on the new note, whether or not the
-  template mentions it.
+- The plugin always sets the marker property on the new note, whether or not
+  the template mentions it.
 - Embed placeholders in the template (`![[{{title}}.pdf]]` and the variants
   handled today) resolve to the canonical path.
 - Refuses, with a clear notice, if a note of that name already exists or no
   template is configured.
 
-### Live operations
+### Automatic wrapping
 
-These react to Obsidian's vault events. The same events fire for in-app
-actions, for external changes Obsidian notices while running, and for changes
-delivered by sync from another device; a plugin cannot officially tell these
-apart. Every response therefore waits for a settle period and then
-re-examines the pair, acting only if it is still out of step (see Sync
-safety).
+A setting (owner's decision): wrap every PDF that is added to the vault while
+the plugin is running. The owner will have it on. Default off *(call)*,
+because it needs a template configured first.
 
-| Event | Response |
+Details, all *(call)*:
+
+- "Added" means a PDF file appearing after the vault has finished loading,
+  however it got there: dropped into Obsidian, saved into the vault folder by
+  another app, or delivered by sync.
+- The plugin waits a settle period, then wraps only if the PDF still exists,
+  no note claims it, and no note of that name exists. This is what stops a
+  device from wrapping a PDF whose note is about to arrive by sync.
+- Automatic wrapping does not open the new note; it shows a notice.
+- PDFs created in Obsidian's configured attachment folder are skipped when
+  that setting names a specific folder. Those are files pasted or dropped into
+  other notes, not documents.
+- **The switch is per device**, stored locally and not synced with the rest of
+  the settings. When the same new PDF reaches two devices at once (for
+  example a scanner saving into iCloud), both could wrap it and produce
+  conflicting notes. The settle-and-check reduces this but cannot remove it. A
+  per-device switch lets the owner run it everywhere and fall back to one
+  device if conflicts appear.
+- PDFs that arrived while Obsidian was closed are not wrapped automatically;
+  they appear under Unwrapped PDFs with a "wrap all".
+
+### Things the user does inside Obsidian
+
+| Action | Response |
 |---|---|
-| Note of a healthy pair renamed or moved | Rename/move the PDF to match; rewrite claim and embed. |
-| PDF of a healthy pair renamed or moved | Rename/move the note to match; rewrite claim and embed. |
-| Folder containing pairs renamed or moved | Both files have already moved together; only rewrite claims and embeds if needed. |
-| Note of a healthy pair deleted | After a grace period, send the PDF to trash (see below). |
-| Note of a broken pair deleted | Nothing. The plugin only acts on PDFs it can see are paired. *(call)* |
-| PDF of a pair deleted | Leave the note. It is now Missing and appears in Needs attention. *(call)* |
-| Partner cannot follow (destination name taken) | Do not undo the user's action. Show a notice; the pair is now broken and appears in Needs attention. *(call)* |
+| Rename or move the note of a healthy pair | Rename/move the PDF to match at once; rewrite claim and embed. |
+| Rename or move the PDF of a healthy pair | Rename/move the note to match at once; rewrite claim and embed. |
+| Rename or move a folder containing pairs | Both files move together; rewrite claims and embeds if needed. |
+| Delete the note of a healthy pair | Delete the PDF too, the same way the note was deleted (the user's Obsidian setting: system trash, vault trash, or permanent). No wait, no quarantine. Skipped if another note still claims the PDF. |
+| Delete the note of a broken pair | Nothing. The plugin only acts on PDFs it can see are paired. *(call)* |
+| Delete the PDF of a pair | Leave the note. It is now Missing and is listed. *(call)* |
+| Duplicate wrapped document (new command) | Copy both files using Obsidian's naming for copies (`Statement 1.md`, `Statement 1.pdf`) and write the new claim. |
+| Copy only the note by other means | The copy is an Extra claim and is listed, with a "copy the PDF for this note" fix. The original is unaffected. |
+| Partner cannot follow (destination name taken) | The user's action stands. Show a notice; the pair is now broken and is listed. *(call)* |
 
-**Deleting.** An in-app delete and an external delete look identical to a
-plugin, and some sync tools and external moves surface as delete-then-create.
-So *(call)*:
+### Everything else
 
-- On deletion of the note of a healthy pair, wait a short grace period (a few seconds). If
-  a note claiming the same PDF appears in that time, treat it as a move, not a
-  delete.
-- Otherwise, if no other note still claims the PDF, move it to trash and show
-  a notice naming it. If another note claims it, leave it.
-- The plugin always uses a recoverable trash (system trash, or the vault's
-  `.trash` folder where system trash is unavailable), even if the user has set
-  Obsidian to delete permanently.
-- A setting lets the user turn this off: "When a wrapped note is deleted:
-  trash its PDF / leave the PDF".
+Changes that are not a local action — made in Finder or by another app while
+Obsidian is open, or delivered by sync — are never acted on directly. After a
+settle period the affected pair is re-examined:
 
-**Duplicating.** A "Duplicate wrapped document" command (file menu on a
-wrapper note, and command palette) copies both files using Obsidian's naming
-convention for copies (`Statement 1.md`, `Statement 1.pdf`) and writes the new
-claim. If the user copies only the note by other means, the copy claims the
-original's PDF; the copy is an Extra claim and shows in Needs attention with a
-"copy the PDF for this note" fix. The original is unaffected.
+- If it is healthy (for example, sync has since delivered the partner's
+  change), nothing happens.
+- If it is broken, it is listed.
+- If a healthy pair's note has gone and the PDF remains, the PDF is kept and
+  listed as "note removed outside Obsidian", with fixes: delete the PDF too,
+  wrap it again, or keep it as a plain PDF. If the PDF then disappears as well
+  (sync catching up), the entry clears itself.
+
+To survive a restart, these "note removed" entries are kept in the plugin's
+data. This is a list of open questions for the user, not a record of pairs;
+losing it loses nothing but the reminder. *(call)*
 
 ### Scan
 
 A scan runs at startup, after the vault has loaded and a settle period has
-passed, and on demand from a command. It examines every note with a claim and
-classifies it.
+passed, and on demand from a command. It classifies every note with a claim
+and, when automatic wrapping is on for this device, collects unwrapped PDFs.
 
-**A scan never changes files.** *(call — this is stricter than the summary the
-owner saw, which had the scan auto-repair unambiguous cases. It was tightened
-once the owner confirmed iCloud and Obsidian Sync on every device: at launch
-a vault is often mid-sync, and a half-delivered rename is indistinguishable
-from a real break.)* Everything the scan finds is listed with one-click fixes.
-
-Before the startup notice is shown, entries are re-checked so that pairs sync
-has since completed drop off the list.
+**A scan never changes files.** Before the startup notice is shown, entries
+are re-checked so that pairs sync has since completed drop off the list.
 
 ### Needs attention
 
-A command opens a list of broken pairs; at startup a notice appears if the
-list is non-empty. Each entry shows the note, the state, and the available
-fixes:
+A command opens the list; at startup a notice appears if it is non-empty. The
+list must be usable on a phone. Each entry shows the file, the state, and the
+available fixes:
 
 | State | Fixes offered |
 |---|---|
@@ -240,40 +283,29 @@ fixes:
 | Displaced | Move the PDF beside the note (renaming to match). |
 | Extra claim | Copy the PDF for this note; or remove this note's claim. |
 | Contested | Per note: move/rename the PDF to this note; copy the PDF for this note; or remove this note's claim. |
+| Note removed outside Obsidian | Delete the PDF too; wrap it again; or keep as a plain PDF. |
+| Unwrapped PDF | Wrap. |
 
-There is a "fix all" covering Misnamed and Displaced entries where the PDF
-has a single claimant and the destination is free. The list must be usable on
-a phone.
+"Fix all" covers Misnamed and Displaced entries where the PDF has a single
+claimant and the destination is free, and "wrap all" covers unwrapped PDFs.
 
 A Missing PDF may simply not have been downloaded yet (iCloud can leave files
-in the cloud). The entry says so, and nothing destructive is ever offered as
-the default for Missing.
+in the cloud). The entry says so, and nothing destructive is ever the default.
 
-### Sync safety
-
-The owner runs the plugin on every device, with some vaults on iCloud and some
-on Obsidian Sync. Design rules that follow *(calls)*:
-
-- **Settle, then reconcile.** No response to an event acts immediately. After
-  the settle period the pair is re-examined; if sync has already delivered the
-  partner's change, there is nothing to do.
-- **Idempotent.** Two devices reacting to the same change must converge on the
-  same files, not create duplicates. A rename whose destination already holds
-  the partner is a no-op.
-- **Nothing automatic at startup.** See Scan.
-- **Trash only, and slowly.** See Deleting. The grace period for deletes is
-  longer than the settle period for renames.
-- **Local intent, if detectable.** Spike 2 looks for a dependable way to tell
-  a change the user made on this device from one sync delivered. If one
-  exists, automatic responses are restricted to local changes, which removes
-  the race entirely. If not, the rules above stand.
+**Unwrapped PDFs.** Listed only when automatic wrapping is on for this device,
+since that is when every PDF is meant to be wrapped. They cover PDFs that
+arrived while Obsidian was closed, and PDFs whose note was removed while the
+plugin was not running (which the files alone cannot distinguish from a new
+PDF). With automatic wrapping off, a lone PDF is just a visible PDF in the
+explorer; its reappearing row is the signal. PDFs in the configured attachment
+folder are excluded, as for automatic wrapping. *(call)*
 
 ### One file in the explorer
 
 - A setting, on by default, hides the PDF row of every healthy pair in the
   core file explorer.
 - Implemented only as generated styling rules keyed on each row's file path.
-  No explorer internals, no DOM observers, no patched handlers.
+  No explorer internals, no DOM observers, no patched explorer handlers.
 - Wrapper notes get a small visual marker by the same mechanism so wrapped
   documents are recognisable. *(call)*
 - The rules are regenerated when pairs change.
@@ -284,8 +316,14 @@ on Obsidian Sync. Design rules that follow *(calls)*:
 ### Settings
 
 - Template path (existing).
+- Marker property name (default `wrapped-pdf`). Changing it does not rename
+  the property in existing notes; the setting's description says so, since
+  notes carrying the old name stop being recognised. *(call)*
+- Wrap new PDFs automatically (per device, default off).
 - Hide paired PDFs in the file explorer (default on).
-- On delete: trash the PDF / leave it (default trash).
+
+The earlier draft's "on delete: trash / leave" setting is dropped; the owner's
+delete rule makes it unnecessary.
 
 ## Technical notes for the builder
 
@@ -293,24 +331,35 @@ on Obsidian Sync. Design rules that follow *(calls)*:
   the instance is passed to `saveData`. This should fail to serialise and has
   not been verified in Obsidian. Settings should go back to a plain data
   object. The cached attachment-folder lookup goes away with the feature.
-- **Shape the core for testing.** Put pair classification and repair planning
-  in a module that takes a plain snapshot (file paths, and each note's claim)
-  and returns states and intended actions, with no Obsidian imports. A thin
-  layer gathers the snapshot from `vault`/`metadataCache` and executes actions.
-  Add a unit-test runner (the designer suggests Vitest) and run it in CI
-  alongside build and lint.
-- **Prefer reconcile over mirror.** Events arrive in uncertain order (a folder
-  move fires for every child). Treat an event as a hint to reconcile the
-  affected pair after a brief settle, and make reconciliation idempotent, so a
-  partner that has already moved is a no-op. Guard against reacting to the
-  plugin's own renames.
+- **Local intent.** Obsidian's vault events do not say where a change came
+  from. The designer's proposed mechanism: wrap the documented `Vault` methods
+  that in-app actions go through (`rename`, `trash`, `delete`) so the plugin
+  notes "this path is being changed locally" just before the event fires.
+  Changes Obsidian picks up from the file system should not pass through those
+  methods. This wraps public API, not explorer internals, but it is still an
+  interception and is **unverified**: in particular, whether Obsidian Sync
+  applies remote changes through the same methods is unknown. Spike 2 settles
+  it. Whatever the mechanism, the default when unsure is "not local".
+- **Shape the core for testing.** Put pair classification and fix planning in
+  a module that takes a plain snapshot (file paths, and each note's claim) and
+  returns states and intended actions, with no Obsidian imports. A thin layer
+  gathers the snapshot from `vault`/`metadataCache` and executes actions. Add
+  a unit-test runner (the designer suggests Vitest) and run it in CI alongside
+  build and lint.
+- **Reconcile, do not mirror.** Events arrive in uncertain order (a folder
+  move fires for every child). Treat an event as a hint to re-examine the
+  affected pair, make every action idempotent (a rename whose destination
+  already holds the partner is a no-op), and guard against reacting to the
+  plugin's own changes, including PDFs it creates when duplicating.
 - **Useful APIs** (present in the installed typings): `vault.on('rename')`
   gives the old path; `metadataCache.on('deleted')` gives the deleted note's
   previous cache, which is how to tell a deleted note was a wrapper;
   `fileManager.renameFile` updates links; `fileManager.processFrontMatter` for
-  claims; `fileManager.trashFile` / `vault.trash` for trash. Register `create`
-  handling only after layout is ready, since the vault fires `create` for every
-  file on load. Raise `minAppVersion` to whatever these require.
+  claims; `fileManager.trashFile` deletes according to the user's setting;
+  `app.saveLocalStorage` / `loadLocalStorage` for the per-device switch.
+  Register `create` handling only after layout is ready, since the vault fires
+  `create` for every file on load. Raise `minAppVersion` to whatever these
+  require.
 - **Naming is inconsistent after the rename to `pdf-wrapper`.** README,
   CLAUDE.md and `package.json` still say `wrap-pdf` / "Wrap PDF" and reference
   `src/wrap-pdf.ts`. Bring them in line and rewrite the README for the new
@@ -325,38 +374,44 @@ These are throwaway and gate decisions in the plan.
    rows by styling rules, on desktop and on mobile. Look for gaps or missing
    rows, and behaviour after restart. If it misbehaves at the owner's real
    document count, ship the setting defaulting to off and say so.
-2. **Event shapes under sync.** With a logging build, in one iCloud vault and
-   one Obsidian Sync vault, with a second device (including a phone) open:
-   record what each device reports for in-app rename, move and delete of a
-   note and of a PDF; a folder move; and the same done in Finder. Specifically
-   establish:
+2. **Event shapes and local intent.** With a logging build that includes the
+   proposed `Vault` method wrapping, in one iCloud vault and one Obsidian Sync
+   vault, with a second device (including a phone) open: rename, move and
+   delete a note and a PDF in Obsidian; move a folder; do the same in Finder;
+   add a new PDF by each route the owner uses. Establish:
+   - whether every in-app action is identified as local, on desktop and
+     mobile;
+   - whether any Finder or sync-delivered change is wrongly identified as
+     local (Obsidian Sync especially);
    - whether a rename made on device A arrives on device B as a rename or as
      delete-then-create, and how far apart the note and PDF arrive;
-   - whether anything dependable distinguishes a local change from a
-     sync-delivered one;
+   - how long after a new PDF appears its note reaches the other device;
    - what a not-yet-downloaded iCloud PDF looks like to the plugin.
-   The results set the settle and grace durations and decide the "local
-   intent" rule.
+   The results confirm or replace the local-intent mechanism and set the
+   settle durations.
 
 ## Risks
 
-- **Sync races.** A rename on device A can reach device B note-first, with the
-  larger PDF seconds or minutes behind (iCloud especially). If B's plugin
-  renames the PDF before sync delivers it, the likely result is a duplicate or
-  conflict copy. Mitigated by Sync safety; residual risk remains until spike 2
-  has been run on both sync systems.
-- **A rename that arrives as delete-then-create with a slow create** could
-  outlast the delete grace period, trashing the PDF on B, and that deletion
-  would then sync back to A. The PDF is recoverable from trash, and the
-  setting can disable delete-following. If spike 2 shows this pattern, the
-  builder should make "leave the PDF" the default and raise it with the owner.
+- **Local intent may not be dependable.** If in-app actions cannot be reliably
+  identified, the plugin would fall back to listing everything, which defeats
+  goal 2. If sync-delivered changes are misidentified as local, deletes and
+  renames could be repeated on receiving devices. Either result from spike 2
+  must go back to the owner before building further.
+- **In-app delete follows the user's Obsidian setting**, which may be
+  permanent deletion. This is the owner's explicit choice.
+- **Automatic wrapping on several devices** can produce conflicting notes for
+  the same PDF. Mitigated by settle-and-check and the per-device switch;
+  residual risk until spike 2.
+- **Marker name differing between devices** (if settings are not synced) makes
+  one device blind to pairs. It would then leave everything alone, which is
+  safe but confusing.
 - **Explorer hiding** may regress with Obsidian updates. Accepted: it fails to
   "two rows visible".
 
 ## Left to the builder
 
 - Module layout beyond "testable core, thin Obsidian layer, minimal `main.ts`".
-- Exact settle and grace durations (informed by spike 2).
+- Exact settle durations (informed by spike 2).
 - The form of the Needs attention UI (modal or sidebar view) and of the
   visual marker on wrapper notes.
 - How copies are numbered when `Statement 1` exists.
