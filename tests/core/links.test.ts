@@ -50,3 +50,18 @@ test('links to other files are not links to it', () => {
 	expect(links('[[B.pdf]] ![[other/C.pdf]] [x](https://example.com/page)')).toBe(false);
 	expect(links('')).toBe(false);
 });
+test('a markdown link to a PDF whose name contains parentheses, percent-encoded or in angle brackets', () => {
+	expect(links('[x](A%20(1).pdf)', 'folder/A (1).pdf')).toBe(true);
+	expect(links('[x](folder/A%20(1).pdf#page=2 "t")', 'folder/A (1).pdf')).toBe(true);
+	expect(links('[x](<A (1).pdf>)', 'folder/A (1).pdf')).toBe(true);
+	expect(links('![x](<folder/A (1).pdf>) and more (text)', 'folder/A (1).pdf')).toBe(true);
+	expect(links('[x](A%20(2).pdf)', 'folder/A (1).pdf')).toBe(false);
+});
+test('a wikilink with an escaped pipe, as in a table', () => {
+	expect(links('| doc | [[A.pdf\\|alias]] |')).toBe(true);
+	expect(links('| doc | ![[folder/A.pdf\\|300]] |')).toBe(true);
+});
+test('a markdown link whose text holds brackets', () => {
+	expect(links('[see [1]](A.pdf)')).toBe(true);
+	expect(links('[see [1] and [2]](folder/A.pdf)')).toBe(true);
+});

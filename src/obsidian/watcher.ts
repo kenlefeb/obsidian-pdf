@@ -258,6 +258,9 @@ export class Watcher {
 				// A note the cache still remembers but that is gone (deleted with the same folder) does not count.
 				if (vault.getFileByPath(source) !== null) return true;
 			}
+			// The PDF is already gone (for example deleted with its folder): nothing to keep, and `react` will do nothing,
+			// so skip reading notes. Answering "linked" can only keep a PDF.
+			if (vault.getFileByPath(pdfPath) === null) return true;
 			const now = Date.now();
 			const recent = vault.getMarkdownFiles()
 				.filter((file) => file.path !== deletedNote && now - file.stat.mtime <= RECENT_EDIT_MS)

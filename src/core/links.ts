@@ -1,7 +1,6 @@
 import { basename, filename } from "./paths.ts";
 
 const WIKILINK = /\[\[([^\]\n]*)\]\]/g;
-const MARKDOWN_LINK = /\[[^\]\n]*\]\(([^)\n]*)\)/g;
 
 /**
  * True when `text` (a note's whole text, frontmatter included) links to or embeds the PDF at `pdfPath`: a wikilink or
@@ -22,15 +21,56 @@ export function textLinksToPdf(text: string, pdfPath: string): boolean {
 	for (const [, inner = ""] of text.matchAll(WIKILINK)) {
 		if (matches(wikilinkTarget(inner))) return true;
 	}
-	for (const [, inner = ""] of text.matchAll(MARKDOWN_LINK)) {
+	for (const inner of markdownLinkTargets(text)) {
 		if (matches(markdownTarget(inner))) return true;
 	}
 	return false;
 }
 
-/** `folder/A.pdf#page=2|alias` → `folder/A.pdf`. */
+/** `folder/A.pdf#page=2|alias` → `folder/A.pdf`. A pipe escaped for a table (`\|`) ends the target too. */
 function wikilinkTarget(inner: string): string {
-	return inner.split("|")[0]?.split("#")[0] ?? "";
+	const target = inner.split("|")[0]?.split("#")[0] ?? "";
+	return target.endsWith("\\") ? target.slice(0, -1) : target;
+}
+
+/**
+ * The raw targets of the markdown links and embeds in `text`: what follows each `](` that has a `[` before it on the
+ * same line (so link text may hold brackets), up to the matching `)` (parentheses inside the target may nest), or up
+ * to `>` for the `<…>` form. A target is not followed past the end of its line.
+ */
+function markdownLinkTargets(text: string): string[] {
+	const targets: string[] = [];
+	let at = text.indexOf("](");
+	while (at >= 0) {
+		const lineStart = text.lastIndexOf("\n", at) + 1;
+		const start = at + 2;
+		if (text.slice(lineStart, at).includes("[")) {
+			const end = targetEnd(text, start);
+			if (end !== null) targets.push(text.slice(start, end));
+		}
+		at = text.indexOf("](", start);
+	}
+	return targets;
+}
+
+/** Where the target starting at `start` ends (the offset of its closing `)`), or null when it is not closed on its line. */
+function targetEnd(text: string, start: number): number | null {
+	let depth = 0;
+	let angle = text[start] === "<";
+	for (let i = angle ? start + 1 : start; i < text.length; i++) {
+		const ch = text[i];
+		if (ch === "\n") return null;
+		if (angle) {
+			if (ch === ">") angle = false;
+			continue;
+		}
+		if (ch === "(") depth++;
+		else if (ch === ")") {
+			if (depth === 0) return i;
+			depth--;
+		}
+	}
+	return null;
 }
 
 /** `<folder/A B.pdf>`, `folder/A%20B.pdf#page=2 "title"` → `folder/A B.pdf`. */
