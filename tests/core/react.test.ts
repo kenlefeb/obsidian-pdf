@@ -66,7 +66,7 @@ test('folder move: partner already beside the note → setClaim only', () => {
 });
 test('folder move: partner event not yet arrived → recheck only', () => {
 	const r = react({ kind: 'rename', path: 'z/S.md', oldPath: 'a/S.md', local: true },
-		snap(['z/S.md'], ['a/S.pdf'], [c('z/S.md', null, 'a/S.pdf')]));
+		snap(['z/S.md'], [], [c('z/S.md', null, 'a/S.pdf')]));
 	expect(r).toEqual({ actions: [], recheck: true, pendingRemoved: null });
 });
 test('note rename whose pair was already broken does nothing but recheck', () => {
@@ -114,11 +114,11 @@ test('PDF rename that keeps the pair intact (extension case only) → setClaim o
 });
 test('renaming an unclaimed PDF or an unmarked note does nothing', () => {
 	expect(react({ kind: 'rename', path: 'a/New.pdf', oldPath: 'a/Old.pdf', local: true },
-		snap(['a/Old.md'], ['a/New.pdf'], []))).toEqual({ actions: [], recheck: false, pendingRemoved: null });
+		snap(['a/Old.md'], ['a/New.pdf'], []))).toEqual({ actions: [], recheck: true, pendingRemoved: null });
 	expect(react({ kind: 'rename', path: 'a/New.pdf', oldPath: 'a/Old.pdf', local: true },
-		snap(['a/Old.md'], ['a/New.pdf'], [c('a/Old.md', 'a/Other.pdf')]))).toEqual({ actions: [], recheck: false, pendingRemoved: null });
+		snap(['a/Old.md'], ['a/New.pdf'], [c('a/Old.md', 'a/Other.pdf')]))).toEqual({ actions: [], recheck: true, pendingRemoved: null });
 	expect(react({ kind: 'rename', path: 'a/New.md', oldPath: 'a/Old.md', local: true },
-		snap(['a/New.md'], ['a/Old.pdf'], []))).toEqual({ actions: [], recheck: false, pendingRemoved: null });
+		snap(['a/New.md'], ['a/Old.pdf'], []))).toEqual({ actions: [], recheck: true, pendingRemoved: null });
 });
 test('local delete of a healthy note deletes the PDF', () => {
 	expect(react({ kind: 'delete', path: 'a/S.md', local: true, claimedPdf: 'a/S.pdf' }, snap([], ['a/S.pdf'], [])))
@@ -131,24 +131,24 @@ test('non-local delete protects the PDF', () => {
 test('local delete leaves a PDF another note still claims', () => {
 	const r = react({ kind: 'delete', path: 'a/S.md', local: true, claimedPdf: 'a/S.pdf' },
 		snap(['a/S 1.md'], ['a/S.pdf'], [c('a/S 1.md', 'a/S.pdf')]));
-	expect(r).toEqual({ actions: [], recheck: false, pendingRemoved: null });
+	expect(r).toEqual({ actions: [], recheck: true, pendingRemoved: null });
 });
 test('non-local delete leaves a PDF another note still claims, with no pending removal', () => {
 	const r = react({ kind: 'delete', path: 'a/S.md', local: false, claimedPdf: 'a/S.pdf' },
 		snap(['a/S 1.md'], ['a/S.pdf'], [c('a/S 1.md', 'a/S.pdf')]));
-	expect(r).toEqual({ actions: [], recheck: false, pendingRemoved: null });
+	expect(r).toEqual({ actions: [], recheck: true, pendingRemoved: null });
 });
 test('local delete of a broken pair\'s note does nothing', () => {
 	const r = react({ kind: 'delete', path: 'a/S.md', local: true, claimedPdf: 'att/S.pdf' }, snap([], ['att/S.pdf'], []));
-	expect(r).toEqual({ actions: [], recheck: false, pendingRemoved: null });
+	expect(r).toEqual({ actions: [], recheck: true, pendingRemoved: null });
 });
 test('delete of a note whose PDF is already gone does nothing', () => {
 	const r = react({ kind: 'delete', path: 'a/S.md', local: true, claimedPdf: 'a/S.pdf' }, snap([], [], []));
-	expect(r).toEqual({ actions: [], recheck: false, pendingRemoved: null });
+	expect(r).toEqual({ actions: [], recheck: true, pendingRemoved: null });
 });
 test('delete of a note with no claim does nothing', () => {
 	const r = react({ kind: 'delete', path: 'a/S.md', local: true, claimedPdf: null }, snap([], ['a/S.pdf'], []));
-	expect(r).toEqual({ actions: [], recheck: false, pendingRemoved: null });
+	expect(r).toEqual({ actions: [], recheck: true, pendingRemoved: null });
 });
 test('delete of a PDF never deletes the note', () => {
 	for (const local of [true, false]) {
@@ -161,6 +161,55 @@ test('create of a note or PDF asks for a recheck, anything else nothing', () => 
 	expect(react({ kind: 'create', path: 'a/S.md', local: true }, s)).toEqual({ actions: [], recheck: true, pendingRemoved: null });
 	expect(react({ kind: 'create', path: 'a/S.PDF', local: false }, s)).toEqual({ actions: [], recheck: true, pendingRemoved: null });
 	expect(react({ kind: 'create', path: 'a/S.png', local: true }, s)).toEqual({ actions: [], recheck: false, pendingRemoved: null });
+});
+test('non-local rename: partner already beside the note writes nothing', () => {
+	const r = react({ kind: 'rename', path: 'z/S.md', oldPath: 'a/S.md', local: false },
+		snap(['z/S.md'], ['z/S.pdf'], [c('z/S.md', 'z/S.pdf')]));
+	expect(r).toEqual({ actions: [], recheck: true, pendingRemoved: null });
+});
+test('non-local PDF rename that keeps the pair intact writes nothing', () => {
+	const r = react({ kind: 'rename', path: 'a/S.PDF', oldPath: 'a/S.pdf', local: false },
+		snap(['a/S.md'], ['a/S.PDF'], [c('a/S.md', 'a/S.PDF')]));
+	expect(r).toEqual({ actions: [], recheck: true, pendingRemoved: null });
+});
+test('case-only note rename follows: the partner itself is not a clash', () => {
+	const r = react({ kind: 'rename', path: 'a/old.md', oldPath: 'a/Old.md', local: true },
+		snap(['a/old.md'], ['a/Old.pdf'], [c('a/old.md', 'a/Old.pdf')]));
+	expect(r).toEqual({
+		actions: [
+			{ type: 'rename', from: 'a/Old.pdf', to: 'a/old.pdf' },
+			{ type: 'setClaim', notePath: 'a/old.md', pdfPath: 'a/old.pdf', oldTargets: ['a/Old.pdf', 'Old.pdf', 'Old'] }],
+		recheck: false, pendingRemoved: null });
+});
+test('case-only PDF rename follows: the note itself is not a clash', () => {
+	const r = react({ kind: 'rename', path: 'a/old.pdf', oldPath: 'a/Old.pdf', local: true },
+		snap(['a/Old.md'], ['a/old.pdf'], [c('a/Old.md', 'a/old.pdf')]));
+	expect(r).toEqual({
+		actions: [
+			{ type: 'rename', from: 'a/Old.md', to: 'a/old.md' },
+			{ type: 'setClaim', notePath: 'a/old.md', pdfPath: 'a/old.pdf', oldTargets: ['a/Old.pdf', 'Old.pdf', 'Old'] }],
+		recheck: false, pendingRemoved: null });
+});
+test('note rename does not take a PDF another note now owns', () => {
+	const r = react({ kind: 'rename', path: 'b/New.md', oldPath: 'a/Old.md', local: true },
+		snap(['b/New.md', 'a/Old.md'], ['a/Old.pdf'], [c('b/New.md', 'a/Old.pdf'), c('a/Old.md', 'a/Old.pdf')]));
+	expect(r).toEqual({ actions: [], recheck: true, pendingRemoved: null });
+});
+test('extension-changing renames ask for a recheck', () => {
+	const s = snap(['a/S.txt'], ['a/S.pdf'], []);
+	expect(react({ kind: 'rename', path: 'a/S.txt', oldPath: 'a/S.md', local: true }, s)).toEqual(
+		{ actions: [], recheck: true, pendingRemoved: null });
+	expect(react({ kind: 'rename', path: 'a/S.png', oldPath: 'a/S.pdf', local: true }, s)).toEqual(
+		{ actions: [], recheck: true, pendingRemoved: null });
+	expect(react({ kind: 'rename', path: 'a/x.png', oldPath: 'a/y.png', local: true }, s)).toEqual(
+		{ actions: [], recheck: false, pendingRemoved: null });
+});
+test('delete of a file that is neither note nor PDF does nothing', () => {
+	expect(react({ kind: 'delete', path: 'a/x.png', local: true, claimedPdf: null }, snap([], [], []))).toEqual(
+		{ actions: [], recheck: false, pendingRemoved: null });
+});
+test('shouldAutoWrap treats a note of that name as present ignoring case', () => {
+	expect(shouldAutoWrap('a/N.pdf', snap(['a/n.md'], ['a/N.pdf'], []), null)).toBe(false);
 });
 test('shouldAutoWrap', () => {
 	const s = snap(['a/S.md', 'a/N.md'], ['a/S.pdf', 'a/N.pdf', 'a/New.pdf', 'att/x.pdf'], [c('a/S.md', 'a/S.pdf')]);

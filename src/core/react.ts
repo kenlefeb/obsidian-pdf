@@ -1,4 +1,4 @@
-import { basename, dirname, filename, findPathIgnoringCase, isInFolder, isNote, isPdf, joinPath, samePair } from "./paths.ts";
+import { basename, dirname, filename, isInFolder, isNote, isPdf, joinPath, samePair } from "./paths.ts";
 import type { Action, NoteClaim, Reaction, Snapshot, VaultEvent } from "./types.ts";
 
 const nothing = (recheck = false, pendingRemoved: string | null = null): Reaction => ({ actions: [], recheck, pendingRemoved });
@@ -14,9 +14,10 @@ function partnerDestination(anchor: string, partner: string): string {
 	return joinPath(dirname(anchor), `${basename(anchor)}.${ownExtension(partner)}`);
 }
 
-function isFree(path: string, snapshot: Snapshot): boolean {
-	return findPathIgnoringCase(snapshot.pdfPaths, path) === null
-		&& findPathIgnoringCase(snapshot.notePaths, path) === null;
+/** Free means in neither list ignoring letter case; the partner's own current path does not count against itself. */
+function isFree(path: string, partner: string, snapshot: Snapshot): boolean {
+	const wanted = path.toLowerCase();
+	return ![...snapshot.pdfPaths, ...snapshot.notePaths].some((p) => p !== partner && p.toLowerCase() === wanted);
 }
 
 /**
@@ -33,7 +34,7 @@ function followRename(
 ): Reaction {
 	if (!local) return nothing(true);
 	const to = partnerDestination(anchor, partner);
-	if (!isFree(to, snapshot)) {
+	if (!isFree(to, partner, snapshot)) {
 		return {
 			actions: [{ type: "notice", message: `Could not rename ${partner} to match ${anchor}: a file with that name already exists.` }],
 			recheck: true,
@@ -52,10 +53,13 @@ function reactToNoteRename(path: string, oldPath: string, local: boolean, snapsh
 	const claim = snapshot.claims.find((c) => c.notePath === path);
 	if (!claim) return nothing();
 	if (claim.pdfPath !== null && samePair(path, claim.pdfPath)) {
+		if (!local) return nothing(true);
 		return { actions: [{ type: "setClaim", notePath: path, pdfPath: claim.pdfPath, oldTargets: [] }], recheck: false, pendingRemoved: null };
 	}
 	if (claim.pdfPath !== null && samePair(oldPath, claim.pdfPath)) {
 		const pdf = claim.pdfPath;
+		const ownedByAnother = snapshot.claims.some((c) => c.notePath !== path && c.pdfPath === pdf && samePair(c.notePath, pdf));
+		if (ownedByAnother) return nothing(true);
 		return followRename(path, pdf, pdf, local, snapshot, (to) => ({ notePath: path, pdfPath: to }));
 	}
 	return nothing(true);
@@ -77,6 +81,7 @@ function reactToPdfRename(path: string, oldPath: string, local: boolean, snapsho
 	if (!claim) return nothing();
 	const note = claim.notePath;
 	if (samePair(note, path)) {
+		if (!local) return nothing(true);
 		return { actions: [{ type: "setClaim", notePath: note, pdfPath: path, oldTargets: [] }], recheck: false, pendingRemoved: null };
 	}
 	return followRename(path, note, oldPath, local, snapshot, (to) => ({ notePath: to, pdfPath: path }));
@@ -89,25 +94,36 @@ function reactToNoteDelete(path: string, local: boolean, claimedPdf: string | nu
 	return nothing(true, claimedPdf);
 }
 
-/** Decides what to do about one vault event. `snapshot` is taken AFTER the event. */
-export function react(event: VaultEvent, snapshot: Snapshot): Reaction {
+function decide(event: VaultEvent, snapshot: Snapshot): Reaction {
 	switch (event.kind) {
 		case "rename":
 			if (isNote(event.path)) return reactToNoteRename(event.path, event.oldPath, event.local, snapshot);
 			if (isPdf(event.path)) return reactToPdfRename(event.path, event.oldPath, event.local, snapshot);
 			return nothing();
 		case "delete":
-			if (isNote(event.path)) return reactToNoteDelete(event.path, event.local, event.claimedPdf, snapshot);
-			return isPdf(event.path) ? nothing(true) : nothing();
+			return isNote(event.path) ? reactToNoteDelete(event.path, event.local, event.claimedPdf, snapshot) : nothing();
 		case "create":
-			return nothing(isNote(event.path) || isPdf(event.path));
+			return nothing();
 	}
+}
+
+const isPairFile = (path: string): boolean => isNote(path) || isPdf(path);
+
+/** Decides what to do about one vault event. `snapshot` is taken AFTER the event. */
+export function react(event: VaultEvent, snapshot: Snapshot): Reaction {
+	const reaction = decide(event, snapshot);
+	if (reaction.actions.length > 0) return reaction;
+	// An event touching a note or PDF always deserves a recheck unless something was acted on.
+	const touchesPair = isPairFile(event.path) || (event.kind === "rename" && isPairFile(event.oldPath));
+	return { ...reaction, recheck: reaction.recheck || touchesPair };
 }
 
 /** True for a PDF nobody claims and no note sits beside, outside the attachment folder. */
 export function shouldAutoWrap(pdfPath: string, snapshot: Snapshot, attachmentFolder: string | null): boolean {
 	return snapshot.pdfPaths.includes(pdfPath)
 		&& !snapshot.claims.some((c) => c.pdfPath === pdfPath)
-		&& !snapshot.notePaths.some((n) => samePair(n, pdfPath))
+		&& !snapshot.notePaths.some((n) => isNote(n)
+			&& dirname(n).toLowerCase() === dirname(pdfPath).toLowerCase()
+			&& basename(n).toLowerCase() === basename(pdfPath).toLowerCase())
 		&& (attachmentFolder === null || !isInFolder(pdfPath, attachmentFolder));
 }
