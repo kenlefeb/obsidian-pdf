@@ -1,7 +1,7 @@
 # Paired PDF documents — design
 
 Date: 2026-11-15
-Status: awaiting approval (revision 3)
+Status: approved by owner 2026-11-15 (revision 3)
 
 ## Intent
 
