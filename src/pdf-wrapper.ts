@@ -2,6 +2,7 @@ import { App, normalizePath, Notice, TFile, TFolder, type TAbstractFile } from "
 import { isLinkSafeName } from "./core/claims.ts";
 import { dirname, findPathIgnoringCase, isNote, joinPath } from "./core/paths.ts";
 import type { PdfWrapperSettings } from "./core/settings-data.ts";
+import { pathList, templaterOutcome } from "./core/templater-outcome.ts";
 import {
 	defaultTemplate,
 	defaultTemplatePath,
@@ -20,8 +21,11 @@ export class WrapMessage extends Error {
 
 /** A wrap that was refused before a note was created. (The template may have been created or repaired.) */
 export class WrapRefusal extends WrapMessage {
-	/** `note-exists`: a note already sits beside the PDF. `in-flight`: the same note is being created by another wrap right now. */
-	constructor(message: string, readonly reason: "note-exists" | "in-flight" | "other" = "other") {
+	/**
+	 * `note-exists`: a note already sits beside the PDF. `in-flight`: the same note is being created by another wrap right
+	 * now. `template-failed`: Templater ran but left no note (its template failed or its prompt was cancelled).
+	 */
+	constructor(message: string, readonly reason: "note-exists" | "in-flight" | "template-failed" | "other" = "other") {
 		super(message);
 		this.name = "WrapRefusal";
 	}
@@ -36,14 +40,16 @@ export class WrapIncomplete extends WrapMessage {
 }
 
 /**
- * Templater ran without an error but returned no note, and none is at the expected path: the template renamed or
- * moved its own note. Shown as it is (after "Failed to wrap"), not as "Could not create".
+ * Templater ran without an error but returned no note, none is at the expected path, and the new notes in the vault do
+ * not show which one it created: the template renamed or moved its own note. Shown as it is (after "Failed to wrap"),
+ * not as "Could not create".
  */
 class TemplaterNoteElsewhere extends Error {
-	constructor(pdfName: string, markerProperty: string) {
+	constructor(pdfName: string, markerProperty: string, newNotes: string[]) {
 		super(
-			`Templater created the note somewhere else and it could not be found. Look for a new note, move it beside ${pdfName}, ` +
-			`and add the "${markerProperty}" property — or change the template so it does not rename or move its note.`,
+			`Templater created the note somewhere else and it could not be found. Look for a new note (${pathList(newNotes)}), ` +
+			`move it beside ${pdfName}, and add the "${markerProperty}" property — or change the template so it does not ` +
+			`rename or move its note.`,
 		);
 		this.name = "TemplaterNoteElsewhere";
 	}
@@ -55,6 +61,12 @@ class TemplaterNoteElsewhere extends Error {
  * case-insensitive file system.
  */
 const inFlight = new Set<string>();
+
+/**
+ * How many wraps have started since the plugin loaded. With `inFlight`, tells whether another wrap ran during a
+ * Templater call, in which case a new note in the vault may be that wrap's and not this one's.
+ */
+let wrapsStarted = 0;
 
 /** Where the note wrapping `pdf` lives: beside it, with the same base name. */
 export function siblingNotePath(pdf: TFile): string {
@@ -89,6 +101,7 @@ export async function wrapPdf(
 		throw new WrapRefusal(`${pdfFile.name} is already being wrapped.`, "in-flight");
 	}
 	inFlight.add(key);
+	wrapsStarted++;
 	try {
 		return await wrapOnce(app, settings, saveSettings, pdfFile, options);
 	} finally {
@@ -125,7 +138,8 @@ async function wrapOnce(
 	try {
 		note = await createNoteFromTemplate(app, templateFile, folder, pdfFile, settings.markerProperty);
 	} catch (e) {
-		if (e instanceof TemplaterNoteElsewhere) throw e;
+		// Messages about what Templater did, shown as they are; nothing was left at the note path by this wrap.
+		if (e instanceof TemplaterNoteElsewhere || e instanceof WrapRefusal) throw e;
 		// Templater may have created the file before failing.
 		const left = app.vault.getAbstractFileByPath(notePath);
 		if (left instanceof TFile) throw notMarked(left.path, pdfFile, settings.markerProperty, e);
@@ -332,6 +346,10 @@ async function createNoteFromTemplate(
 	if (templater) {
 		let created: TFile | undefined;
 		let ran = false;
+		// What exists before the call, so that afterwards a note Templater created elsewhere can be told apart from none.
+		const before = app.vault.getMarkdownFiles().map((file) => file.path);
+		const startedBefore = wrapsStarted;
+		const aloneAtStart = inFlight.size <= 1;
 		try {
 			created = await templater.templater.create_new_note_from_template(templateFile, folder, filename, false);
 			ran = true;
@@ -349,9 +367,28 @@ async function createNoteFromTemplate(
 			// Templater may not return the file; look it up
 			const found = app.vault.getAbstractFileByPath(notePath);
 			if (found instanceof TFile) return found;
-			// It ran and made a note we cannot find (the template renamed or moved it). Creating another here would
-			// leave a second note nobody is told about.
-			throw new TemplaterNoteElsewhere(pdfFile.name, markerProperty);
+			// Decide from the notes that exist now, not from an assumption about what Templater does on an error.
+			// A new note is identified safely only when no other wrap ran meanwhile (its note would be new too).
+			const after = app.vault.getMarkdownFiles().map((file) => file.path);
+			const safe = aloneAtStart && inFlight.size <= 1 && wrapsStarted === startedBefore;
+			const outcome = templaterOutcome(before, after, safe);
+			if (outcome.kind === "none") {
+				// Templater made no note, or removed the one it made (its template failed or a prompt was cancelled).
+				throw new WrapRefusal(
+					`Templater did not create a note for ${pdfFile.name}. Check its own message, fix the template or answer ` +
+					`its prompt, then wrap again.`,
+					"template-failed",
+				);
+			}
+			if (outcome.kind === "moved") {
+				// The template renamed or moved its note: the caller moves it back beside the PDF and marks it.
+				const moved = app.vault.getAbstractFileByPath(outcome.path);
+				if (moved instanceof TFile && moved.path !== templateFile.path) return moved;
+				throw new TemplaterNoteElsewhere(pdfFile.name, markerProperty, [outcome.path]);
+			}
+			// Several new notes, or one we cannot attribute: creating another here would leave a second note nobody is
+			// told about, so name them instead.
+			throw new TemplaterNoteElsewhere(pdfFile.name, markerProperty, outcome.paths);
 		}
 	}
 
