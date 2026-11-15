@@ -1,4 +1,5 @@
 import { filename, isPdf } from "./paths.ts";
+import type { NoteClaim } from "./types.ts";
 
 // [[target]], [[target|alias]], [[target#subpath]] or [[target#subpath|alias]]
 const LINK = /^\[\[([^[\]|#]+)(?:#[^[\]|]*)?(?:\|[^[\]]*)?\]\]$/;
@@ -20,4 +21,14 @@ export function formatClaim(pdfPath: string): string {
 /** False when the path holds characters that cannot appear in a wikilink target, so a claim could not round-trip. */
 export function isLinkSafeName(path: string): boolean {
 	return !/[[\]|#^]/.test(path);
+}
+
+/**
+ * True when a note's claim now differs from the one last listed for it: it appeared, disappeared, or its target or
+ * the PDF that target resolves to changed. Null means the note has no claim. Used to skip refreshes for edits that do
+ * not touch the claim.
+ */
+export function claimChanged(listed: NoteClaim | null, current: NoteClaim | null): boolean {
+	if (listed === null || current === null) return listed !== current;
+	return listed.rawTarget !== current.rawTarget || listed.pdfPath !== current.pdfPath;
 }

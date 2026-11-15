@@ -5,12 +5,30 @@ import { isAutoWrapOn, setAutoWrap } from "./obsidian/auto-wrap.ts";
 
 export type { PdfWrapperSettings } from "./core/settings-data.ts";
 
+/** What the rest of the plugin must do when a setting changes. */
+export interface SettingCallbacks {
+	/** Unwrapped entries appear or disappear with the automatic-wrapping switch. */
+	onAutoWrapChanged: () => void;
+	onHideChanged: () => void;
+	/** A committed change of the marker property: pairs must be read again under the new name. */
+	onMarkerChanged: () => void;
+}
+
 export class PdfWrapperSettingTab extends PluginSettingTab {
 	plugin: PdfWrapperPlugin;
+	/** Saves what is typed in the marker field; set while the tab is shown. */
+	private commitMarker: (() => Promise<void>) | null = null;
 
-	constructor(app: App, plugin: PdfWrapperPlugin, private readonly onAutoWrapChanged: () => void, private readonly onHideChanged: () => void) {
+	constructor(app: App, plugin: PdfWrapperPlugin, private readonly callbacks: SettingCallbacks) {
 		super(app, plugin);
 		this.plugin = plugin;
+	}
+
+	hide(): void {
+		// Closing the settings while the marker field has focus may not blur it first.
+		this.commitMarker?.().catch((error: unknown) => console.error("PDF Wrapper: could not save the marker property", error));
+		this.commitMarker = null;
+		super.hide();
 	}
 
 	display(): void {
@@ -34,13 +52,24 @@ export class PdfWrapperSettingTab extends PluginSettingTab {
 		new Setting(containerEl)
 			.setName('Marker property')
 			.setDesc('Frontmatter property that marks a note as wrapping a PDF. Changing this does not rename the property in existing notes, so they stop being recognised until you update them.')
-			.addText(text => text
-				.setPlaceholder(DEFAULT_SETTINGS.markerProperty)
-				.setValue(this.plugin.settings.markerProperty)
-				.onChange(async (value) => {
-					this.plugin.settings.markerProperty = value.trim() || DEFAULT_SETTINGS.markerProperty;
+			.addText(text => {
+				text.setPlaceholder(DEFAULT_SETTINGS.markerProperty).setValue(this.plugin.settings.markerProperty);
+				// Committed when the field loses focus, not per keystroke: a wrap that ran while "pdf-doc" was being typed
+				// would otherwise add a "pd:" line to the template and mark the note "pd".
+				const commit = async () => {
+					const value = text.getValue().trim() || DEFAULT_SETTINGS.markerProperty;
+					// An emptied field falls back to the default; show it.
+					if (text.getValue() !== value) text.setValue(value);
+					if (value === this.plugin.settings.markerProperty) return;
+					this.plugin.settings.markerProperty = value;
 					await this.plugin.saveSettings();
-				}));
+					this.callbacks.onMarkerChanged();
+				};
+				this.commitMarker = commit;
+				text.inputEl.addEventListener("blur", () => {
+					commit().catch((error: unknown) => console.error("PDF Wrapper: could not save the marker property", error));
+				});
+			});
 
 		new Setting(containerEl)
 			// eslint-disable-next-line obsidianmd/ui/sentence-case -- "PDFs" is an acronym plural; the text is the spec's wording.
@@ -51,8 +80,7 @@ export class PdfWrapperSettingTab extends PluginSettingTab {
 				.setValue(isAutoWrapOn(this.app))
 				.onChange((value) => {
 					setAutoWrap(this.app, value);
-					// Unwrapped entries appear or disappear with the switch.
-					this.onAutoWrapChanged();
+					this.callbacks.onAutoWrapChanged();
 				}));
 
 		new Setting(containerEl)
@@ -61,7 +89,7 @@ export class PdfWrapperSettingTab extends PluginSettingTab {
 				.setValue(this.plugin.settings.hidePairedPdfs)
 				.onChange(async (value) => {
 					this.plugin.settings.hidePairedPdfs = value;
-					this.onHideChanged();
+					this.callbacks.onHideChanged();
 					await this.plugin.saveSettings();
 				}));
 

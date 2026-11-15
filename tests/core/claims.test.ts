@@ -1,5 +1,5 @@
 import { expect, test } from "vitest";
-import { formatClaim, isLinkSafeName, parseClaim } from "../../src/core/claims.ts";
+import { claimChanged, formatClaim, isLinkSafeName, parseClaim } from "../../src/core/claims.ts";
 
 test("parses canonical and bare links", () => {
 	expect(parseClaim("[[a/S.pdf|S.pdf]]")).toBe("a/S.pdf");
@@ -38,4 +38,21 @@ test("isLinkSafeName flags link metacharacters", () => {
 	for (const p of ["a/x[1].pdf", "a/x]1.pdf", "a/x|y.pdf", "a/x#1.pdf", "a/x^1.pdf"]) {
 		expect(isLinkSafeName(p)).toBe(false);
 	}
+});
+
+// claimChanged
+const claim = (rawTarget: string, pdfPath: string | null) => ({ notePath: 'a/S.md', rawTarget, pdfPath });
+test('claimChanged is false when both are absent or both say the same', () => {
+	expect(claimChanged(null, null)).toBe(false);
+	expect(claimChanged(claim('a/S.pdf', 'a/S.pdf'), claim('a/S.pdf', 'a/S.pdf'))).toBe(false);
+	expect(claimChanged(claim('gone.pdf', null), claim('gone.pdf', null))).toBe(false);
+});
+test('claimChanged is true when the claim appears or disappears', () => {
+	expect(claimChanged(null, claim('a/S.pdf', 'a/S.pdf'))).toBe(true);
+	expect(claimChanged(claim('a/S.pdf', 'a/S.pdf'), null)).toBe(true);
+});
+test('claimChanged is true when the target or what it resolves to changes', () => {
+	expect(claimChanged(claim('a/S.pdf', 'a/S.pdf'), claim('a/T.pdf', 'a/T.pdf'))).toBe(true);
+	expect(claimChanged(claim('S.pdf', 'a/S.pdf'), claim('a/S.pdf', 'a/S.pdf'))).toBe(true);
+	expect(claimChanged(claim('S.pdf', null), claim('S.pdf', 'a/S.pdf'))).toBe(true);
 });

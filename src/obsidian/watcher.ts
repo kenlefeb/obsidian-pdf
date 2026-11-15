@@ -1,15 +1,15 @@
 import { Notice, TFile, type CachedMetadata, type Plugin, type TAbstractFile } from "obsidian";
-import { parseClaim } from "../core/claims.ts";
+import { claimChanged, parseClaim } from "../core/claims.ts";
 import { isNote, isPdf } from "../core/paths.ts";
 import { react } from "../core/react.ts";
 import type { PdfWrapperSettings } from "../core/settings-data.ts";
 import type { OwnChanges } from "../core/marks.ts";
 import { withoutPath } from "../core/snapshot.ts";
 import { waitAtMost, type CappedWait } from "../core/wait.ts";
-import type { VaultEvent } from "../core/types.ts";
+import type { NoteClaim, VaultEvent } from "../core/types.ts";
 import type { Executor } from "./execute.ts";
 import type { LocalIntent } from "./local-intent.ts";
-import { gatherSnapshot } from "./snapshot.ts";
+import { gatherSnapshot, readClaim } from "./snapshot.ts";
 
 /** How long after the last change that needs it the pairs are re-examined. Provisional: not tuned against real sync behaviour. */
 export const SETTLE_MS = 2000;
@@ -33,6 +33,12 @@ export interface WatcherDeps {
 	 * `local` is true when the plugin positively identified it as made by an action inside Obsidian on this device.
 	 */
 	onPdfCreated: (path: string, local: boolean) => void;
+	/** False until the Needs attention list has been built once; until then a property change needs no refresh. */
+	isListReady: () => boolean;
+	/** The note's claim as the list last saw it, or null when it had none. */
+	listedClaim: (notePath: string) => NoteClaim | null;
+	/** Asks for a coalesced refresh of the list and the explorer rules. Only reads the vault. */
+	refreshSoon: () => void;
 }
 
 const reason = (error: unknown): string => (error instanceof Error ? error.message : String(error));
@@ -69,7 +75,23 @@ export class Watcher {
 			this.plugin.registerEvent(vault.on("create", (file) => this.onCreate(file)));
 			this.plugin.registerEvent(vault.on("delete", (file) => this.onPdfDelete(file)));
 			this.plugin.registerEvent(metadataCache.on("deleted", (file, prevCache) => this.onNoteDeleted(file, prevCache)));
+			this.plugin.registerEvent(metadataCache.on("changed", (file) => this.onMetadataChanged(file)));
 		});
+	}
+
+	/**
+	 * A note's frontmatter changed without a rename, create or delete: for example its marker property was deleted in
+	 * the properties panel, or sync delivered a changed claim. Read-only: when the claim differs from the listed one it
+	 * only asks for a refresh, so ordinary typing in a note costs one cache lookup.
+	 */
+	private onMetadataChanged(file: TFile): void {
+		if (this.unloaded || !isNote(file.path) || !this.deps.isListReady()) return;
+		try {
+			const current = readClaim(this.plugin.app, file, this.deps.getSettings().markerProperty);
+			if (claimChanged(this.deps.listedClaim(file.path), current)) this.deps.refreshSoon();
+		} catch (error) {
+			console.error("PDF Wrapper: could not check a changed note", file.path, error);
+		}
 	}
 
 	// The handlers below decide everything that depends on the moment of the event (own change,

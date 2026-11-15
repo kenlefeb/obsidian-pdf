@@ -4,7 +4,7 @@ import { bulkResultMessage, nextPendingRemoved, noteBesidePdf, noteBesidePdfMess
 import { classify } from "../core/classify.ts";
 import { buildAttention, fixesFor, isBulkFixable, isBulkWrappable, planFix } from "../core/fixes.ts";
 import { specificAttachmentFolder } from "../core/settings-data.ts";
-import type { AttentionItem, Classification, FixId, Snapshot } from "../core/types.ts";
+import type { AttentionItem, Classification, FixId, NoteClaim, Snapshot } from "../core/types.ts";
 import { WrapIncomplete, WrapMessage, WrapRefusal } from "../pdf-wrapper.ts";
 import type { Executor } from "./execute.ts";
 import { gatherSnapshot } from "./snapshot.ts";
@@ -32,6 +32,8 @@ export function attachmentFolder(app: App): string | null {
 export class AttentionStore {
 	private list: AttentionItem[] = [];
 	private current: Classification = { pairs: [], unwrappedPdfs: [] };
+	/** The claims of `current`, by note path. */
+	private claimsByNote = new Map<string, NoteClaim>();
 	private bulk = { fix: 0, wrap: 0 };
 	private chain: Promise<unknown> = Promise.resolve();
 	private readonly listeners = new Set<() => void>();
@@ -81,6 +83,11 @@ export class AttentionStore {
 
 	classification(): Classification {
 		return this.current;
+	}
+
+	/** The note's claim as of the last refresh, or null when it had none. */
+	listedClaim(notePath: string): NoteClaim | null {
+		return this.claimsByNote.get(notePath) ?? null;
 	}
 
 	/** How many entries "Fix all" and "Wrap all" would cover, as of the last refresh. */
@@ -218,6 +225,7 @@ export class AttentionStore {
 				if (this.unloaded) return this.items();
 			}
 			this.current = c;
+			this.claimsByNote = new Map(c.pairs.map((pair) => [pair.notePath, pair]));
 			this.list = buildAttention(c, pending, {
 				includeUnwrapped: this.isAutoWrapOn(),
 				attachmentFolder: attachmentFolder(this.plugin.app),

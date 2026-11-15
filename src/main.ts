@@ -54,6 +54,9 @@ export default class PdfWrapperPlugin extends Plugin {
 			onPdfCreated: (path, local) => {
 				if (isAutoWrapOn(this.app)) autoWrapper.onPdfCreated(path, local);
 			},
+			isListReady: () => store.hasScanned(),
+			listedClaim: (notePath) => store.listedClaim(notePath),
+			refreshSoon: () => refreshSoon(),
 		});
 		watcher.start();
 
@@ -122,7 +125,11 @@ export default class PdfWrapperPlugin extends Plugin {
 			})
 		);
 
-		this.addSettingTab(new PdfWrapperSettingTab(this.app, this, () => void store.refresh(), () => explorerStyle.rebuild()));
+		this.addSettingTab(new PdfWrapperSettingTab(this.app, this, {
+			onAutoWrapChanged: () => void store.refresh(),
+			onHideChanged: () => explorerStyle.rebuild(),
+			onMarkerChanged: () => void store.refresh(),
+		}));
 	}
 
 	private async handleWrapPdf(pdfFile: TFile, afterWrap: () => void) {
