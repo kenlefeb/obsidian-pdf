@@ -124,6 +124,34 @@ export class PendingCreates {
 	}
 }
 
+/** How long the source of an in-app copy is remembered for the `create` event of the copy. */
+export const COPY_SOURCE_TTL_MS = 10000;
+
+/** Which file each file just copied inside Obsidian was copied from: destination path → source path. */
+export class CopySources {
+	private readonly sources = new Map<string, { sourcePath: string; expires: number }>();
+
+	constructor(private readonly now: Clock = Date.now) {}
+
+	/** Remembers that `destPath` is a copy of `sourcePath`, for COPY_SOURCE_TTL_MS from now. */
+	record(destPath: string, sourcePath: string): void {
+		const now = this.now();
+		// Forget expired entries nobody took, so the map stays small.
+		for (const [path, source] of this.sources) {
+			if (source.expires <= now) this.sources.delete(path);
+		}
+		this.sources.set(destPath, { sourcePath, expires: now + COPY_SOURCE_TTL_MS });
+	}
+
+	/** The source recorded for `destPath`, once; null when there is none or it has expired. */
+	take(destPath: string): string | null {
+		const source = this.sources.get(destPath);
+		if (source === undefined) return null;
+		this.sources.delete(destPath);
+		return source.expires > this.now() ? source.sourcePath : null;
+	}
+}
+
 /**
  * Paths being changed by this device's own Obsidian (see LocalIntent). A file mark is used up by the first
  * `consume` that matches it. A folder mark is not used up: it answers for the folder itself and for every path

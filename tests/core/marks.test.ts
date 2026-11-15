@@ -1,5 +1,5 @@
 import { expect, test } from "vitest";
-import { IntentMarks, MARK_TTL_MS, OwnChanges, PENDING_CREATE_TTL_MS, PendingCreates } from "../../src/core/marks.ts";
+import { COPY_SOURCE_TTL_MS, CopySources, IntentMarks, MARK_TTL_MS, OwnChanges, PENDING_CREATE_TTL_MS, PendingCreates } from "../../src/core/marks.ts";
 
 function clock(start = 1000) {
 	let now = start;
@@ -162,4 +162,30 @@ test("pending creates: forget drops an entry, so a later note at that path is no
 	expect(pending.has("a/S 1.md")).toBe(false);
 	expect(pending.consume("a/S 1.md")).toBe(false);
 	expect(pending.has("a/T.md")).toBe(true);
+});
+
+test("copy source: taken once", () => {
+	const sources = new CopySources(clock().now);
+	sources.record("a/S 1.md", "a/S.md");
+	expect(sources.take("a/Other.md")).toBeNull();
+	expect(sources.take("a/S 1.md")).toBe("a/S.md");
+	expect(sources.take("a/S 1.md")).toBeNull();
+});
+
+test("copy source: expires after 10000 ms", () => {
+	const c = clock();
+	const sources = new CopySources(c.now);
+	sources.record("a/S 1.md", "a/S.md");
+	c.advance(COPY_SOURCE_TTL_MS - 1);
+	expect(sources.take("a/S 1.md")).toBe("a/S.md");
+	sources.record("a/S 2.md", "a/S.md");
+	c.advance(COPY_SOURCE_TTL_MS);
+	expect(sources.take("a/S 2.md")).toBeNull();
+});
+
+test("copy source: a later record for the same destination replaces the earlier one", () => {
+	const sources = new CopySources(clock().now);
+	sources.record("a/S 1.md", "a/S.md");
+	sources.record("a/S 1.md", "a/T.md");
+	expect(sources.take("a/S 1.md")).toBe("a/T.md");
 });
