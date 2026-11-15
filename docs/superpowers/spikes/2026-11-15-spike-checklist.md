@@ -353,3 +353,23 @@ time Obsidian holds for each file and what the disk lists (including hidden
 iCloud placeholder files, if the disk listing shows them), and the log records
 any change of a PDF's size that Obsidian reports. Whether the PDF opened, and
 what it looked like, comes from your notes in that section.
+
+## Results
+
+### Spike 1 (explorer hiding), recorded 2026-11-15
+
+- Mac, Obsidian 1.15.1, iCloud test vault: hiding works with 300 and with
+  3,000 dummy pairs; the owner scrolled to the end with every PDF hidden.
+- Hiding switched on while the 3,000 pairs were still being created covered
+  only the pairs that existed at that moment (about 950) until creation
+  finished and the rules were rebuilt. Consequence for the plugin: rules must
+  be rebuilt as pairs change, including during a bulk wrap.
+- The same 6,000 rules on 3,000 simulated rows in Chromium 153: all parsed,
+  all PDF rows hidden.
+- Not yet checked: behaviour after restarting Obsidian; the phone.
+- Decision: "Hide paired PDFs" stays on by default.
+
+### Spike 2 (local versus outside changes)
+
+Not yet run. Setup is in place in the iCloud test vault (test folder, event
+log, rename command working). Tasks 7 onward wait on these logs.
