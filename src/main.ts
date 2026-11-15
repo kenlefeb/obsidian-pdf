@@ -14,7 +14,6 @@ import { AutoWrapper, isAutoWrapOn } from "./obsidian/auto-wrap.ts";
 import { AttentionModal } from "./ui/attention-modal.ts";
 import { attentionNotice } from "./core/attention.ts";
 import { duplicateWrapped, healthyPdf } from "./obsidian/duplicate.ts";
-import { registerSpike } from "./spike/spike.ts";
 
 export default class PdfWrapperPlugin extends Plugin {
 	settings!: PdfWrapperSettings;
@@ -25,7 +24,6 @@ export default class PdfWrapperPlugin extends Plugin {
 		const localIntent = new LocalIntent(this.app);
 		this.register(localIntent.install());
 		const own = new OwnChanges();
-		registerSpike(this, localIntent, own);
 
 		// Anything the plugin does that can change pairs ends in a refresh, so the explorer rules never go stale.
 		// The metadata cache can lag a frontmatter write, so look once more after the settle period.

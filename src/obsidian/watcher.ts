@@ -11,7 +11,7 @@ import type { Executor } from "./execute.ts";
 import type { LocalIntent } from "./local-intent.ts";
 import { gatherSnapshot } from "./snapshot.ts";
 
-/** How long after the last change that needs it the pairs are re-examined. Provisional: spike 2 has no data yet. */
+/** How long after the last change that needs it the pairs are re-examined. Provisional: not tuned against real sync behaviour. */
 export const SETTLE_MS = 2000;
 
 /**

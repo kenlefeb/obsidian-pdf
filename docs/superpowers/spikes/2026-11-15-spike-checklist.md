@@ -1,5 +1,10 @@
 # PDF Wrapper spike checklist
 
+> **Note (added when the spike was removed).** The spike commands were removed
+> from the plugin after commit `f2a3fc6`. Spike 1 was run by the owner (see the
+> design spec). Spike 2 was never run. It can still be run by building commit
+> `f2a3fc6`. The rest of this file is unchanged.
+
 This is a test build, not a release. It answers two questions before the rest
 of the plugin is built:
 

@@ -6,7 +6,7 @@ import { IntentMarks } from "../core/marks.ts";
  * Notes which paths are being changed by this device's own Obsidian, by wrapping
  * the `Vault` methods that in-app renames, moves and deletes go through.
  * Changes Obsidian picks up from the file system (Finder, sync) are expected not
- * to pass through these methods. That expectation is unverified; see spike 2.
+ * to pass through these methods. That expectation has not been verified on any sync setup.
  *
  * It also tracks every wrapped call still running (including `FileManager.renameFile`,
  * which rewrites links after `Vault.rename` has returned), so a reaction can wait until
@@ -111,11 +111,6 @@ export class LocalIntent {
 	 */
 	consume(path: string): boolean {
 		return this.marks.consume(path);
-	}
-
-	/** What `consume(path)` would answer, without using a mark up. For diagnostics that must not take a mark from the Watcher. */
-	peek(path: string): boolean {
-		return this.marks.peek(path);
 	}
 
 	/** Resolves once no wrapped call is running (at once when none is). Never rejects. */

@@ -293,7 +293,7 @@ function getTemplaterPlugin(app: App): TemplaterPlugin | null {
 			return plugin as TemplaterPlugin;
 		}
 	} catch (e) {
-		console.warn("Wrap PDF: failed to access Templater plugin", e);
+		console.warn("PDF Wrapper: failed to access Templater plugin", e);
 	}
 	return null;
 }
@@ -328,7 +328,7 @@ async function createNoteFromTemplate(
 				console.warn("PDF Wrapper: Templater failed after creating the note; using the note it created", e);
 				return left;
 			}
-			console.warn("Wrap PDF: Templater failed, falling back to manual creation", e);
+			console.warn("PDF Wrapper: Templater failed, falling back to manual creation", e);
 		}
 	}
 
@@ -349,7 +349,7 @@ function getMoment(): MomentFn | null {
 		const m = (window as unknown as { moment?: MomentFn }).moment;
 		return typeof m === "function" ? m : null;
 	} catch (e) {
-		console.warn("Wrap PDF: failed to access moment", e);
+		console.warn("PDF Wrapper: failed to access moment", e);
 		return null;
 	}
 }
@@ -371,7 +371,7 @@ function getCoreTemplatesPlugin(app: App): CoreTemplatesPlugin | null {
 		}).internalPlugins;
 		return internalPlugins?.getPluginById?.("templates") ?? null;
 	} catch (e) {
-		console.warn("Wrap PDF: failed to access core Templates plugin", e);
+		console.warn("PDF Wrapper: failed to access core Templates plugin", e);
 		return null;
 	}
 }
