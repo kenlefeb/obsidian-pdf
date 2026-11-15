@@ -6,7 +6,8 @@ import { isNote, isPdf } from "./core/paths.ts";
 import { LocalIntent } from "./obsidian/local-intent.ts";
 import { OwnChanges } from "./core/marks.ts";
 import { Executor } from "./obsidian/execute.ts";
-import { Watcher } from "./obsidian/watcher.ts";
+import { SETTLE_MS, Watcher } from "./obsidian/watcher.ts";
+import { installExplorerStyle } from "./obsidian/explorer-style.ts";
 import { AttentionStore, attachmentFolder, scanAtStartup } from "./obsidian/attention-store.ts";
 import { AutoWrapper, isAutoWrapOn } from "./obsidian/auto-wrap.ts";
 import { AttentionModal } from "./ui/attention-modal.ts";
@@ -25,8 +26,25 @@ export default class PdfWrapperPlugin extends Plugin {
 		const own = new OwnChanges();
 		registerSpike(this, localIntent, own);
 
-		const executor = new Executor(this.app, () => this.settings, () => this.saveSettings(), own);
+		// Anything the plugin does that can change pairs ends in a refresh, so the explorer rules never go stale.
+		// The metadata cache can lag a frontmatter write, so look once more after the settle period.
+		let followUp: number | null = null;
+		let refreshSoon: () => void = () => undefined;
+		const executor = new Executor(this.app, () => this.settings, () => this.saveSettings(), own, () => refreshSoon());
 		const store = new AttentionStore(this, executor, () => isAutoWrapOn(this.app));
+		refreshSoon = () => {
+			void store.refresh();
+			if (followUp !== null) window.clearTimeout(followUp);
+			followUp = window.setTimeout(() => {
+				followUp = null;
+				void store.refresh();
+			}, SETTLE_MS);
+		};
+		this.register(() => {
+			if (followUp !== null) window.clearTimeout(followUp);
+			refreshSoon = () => undefined;
+		});
+		const explorerStyle = installExplorerStyle(this, store, () => this.settings.hidePairedPdfs);
 		const autoWrapper = new AutoWrapper(
 			this.app,
 			executor,
@@ -77,7 +95,7 @@ export default class PdfWrapperPlugin extends Plugin {
 				const file = this.app.workspace.getActiveFile();
 				if (!file || !isPdf(file.path)) return false;
 				if (existingSiblingNote(this.app, file)) return false;
-				if (!checking) void this.handleWrapPdf(file);
+				if (!checking) void this.handleWrapPdf(file, () => refreshSoon());
 				return true;
 			},
 		});
@@ -106,16 +124,16 @@ export default class PdfWrapperPlugin extends Plugin {
 					menu.addItem((item) => {
 						item.setTitle('Wrap PDF')
 							.setIcon('file-text')
-							.onClick(() => this.handleWrapPdf(file));
+							.onClick(() => this.handleWrapPdf(file, () => refreshSoon()));
 					});
 				}
 			})
 		);
 
-		this.addSettingTab(new PdfWrapperSettingTab(this.app, this, () => void store.refresh()));
+		this.addSettingTab(new PdfWrapperSettingTab(this.app, this, () => void store.refresh(), () => explorerStyle.rebuild()));
 	}
 
-	private async handleWrapPdf(pdfFile: TFile) {
+	private async handleWrapPdf(pdfFile: TFile, refreshSoon: () => void) {
 		try {
 			await wrapPdf(this.app, this.settings, () => this.saveSettings(), pdfFile, { open: true });
 			new Notice(`Wrapped ${pdfFile.basename}`);
@@ -126,6 +144,9 @@ export default class PdfWrapperPlugin extends Plugin {
 			}
 			new Notice(`Failed to wrap ${pdfFile.name}: ${e instanceof Error ? e.message : String(e)}`);
 			console.error('PDF Wrapper: failed to wrap', pdfFile.path, e);
+		} finally {
+			// A wrap that ended incomplete still created the note, so pairs may have changed either way.
+			refreshSoon();
 		}
 	}
 

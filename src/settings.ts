@@ -8,7 +8,7 @@ export type { PdfWrapperSettings } from "./core/settings-data.ts";
 export class PdfWrapperSettingTab extends PluginSettingTab {
 	plugin: PdfWrapperPlugin;
 
-	constructor(app: App, plugin: PdfWrapperPlugin, private readonly onAutoWrapChanged: () => void) {
+	constructor(app: App, plugin: PdfWrapperPlugin, private readonly onAutoWrapChanged: () => void, private readonly onHideChanged: () => void) {
 		super(app, plugin);
 		this.plugin = plugin;
 	}
@@ -61,6 +61,7 @@ export class PdfWrapperSettingTab extends PluginSettingTab {
 				.setValue(this.plugin.settings.hidePairedPdfs)
 				.onChange(async (value) => {
 					this.plugin.settings.hidePairedPdfs = value;
+					this.onHideChanged();
 					await this.plugin.saveSettings();
 				}));
 

@@ -17,6 +17,8 @@ export class Executor {
 		private readonly getSettings: () => PdfWrapperSettings,
 		private readonly saveSettings: () => Promise<void>,
 		private readonly own: OwnChanges,
+		/** Called after every `run`, even a failed one, because files may have changed. */
+		private readonly afterRun: () => void = () => undefined,
 	) {}
 
 	/**
@@ -27,7 +29,18 @@ export class Executor {
 	 * (the PDF is wrapped but a later step failed), are thrown for the caller to report.
 	 */
 	async run(actions: Action[], options: { quiet?: boolean } = {}): Promise<boolean> {
-		const quiet = options.quiet === true;
+		try {
+			return await this.runAll(actions, options.quiet === true);
+		} finally {
+			try {
+				this.afterRun();
+			} catch (error) {
+				console.error("PDF Wrapper: after-run hook failed", error);
+			}
+		}
+	}
+
+	private async runAll(actions: Action[], quiet: boolean): Promise<boolean> {
 		for (const action of actions) {
 			let outcome: Outcome;
 			try {

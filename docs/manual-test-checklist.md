@@ -149,3 +149,17 @@ None of this has been run in Obsidian yet.
 - [ ] The menu item and command are absent for a note without the marker, with a missing PDF, or with a PDF elsewhere or under another name (the command is not listed in the palette; the file menu has no item).
 - [ ] Trigger the command twice quickly: only one copy pair is made.
 - [ ] Leave a Templater prompt open during an automatic wrap: after 60 seconds the console shows a "PDF Wrapper:" warning; the wrap is not abandoned and later PDFs wait.
+
+## File explorer
+
+Wrapped documents show as one row: the PDF row of every healthy pair is hidden and the note's row gets a "PDF" marker, using generated styling rules only. Setting: "Hide paired PDF files in the file explorer" (on by default). The mechanism was verified by the owner with the spike command (300 and 3,000 rows, desktop, Obsidian 1.15.1); the styling in this build has not been run in Obsidian yet.
+
+- [ ] Wrapped documents show one row (the note) with the "PDF" marker after its name; the PDF row is hidden.
+- [ ] PDFs without a note still show, and notes without the marker property show no "PDF" marker.
+- [ ] Toggling "Hide paired PDF files in the file explorer" off and on shows and hides the PDF rows at once (the marker stays either way).
+- [ ] Rename, move, delete and duplicate a wrapped document: the right rows stay hidden, and no stray PDF row appears or stays hidden.
+- [ ] Break a pair (for example delete the note outside Obsidian or point the marker at a missing PDF): the PDF becomes visible after the next check.
+- [ ] Wrap 20 PDFs in a row (or drop 20 with automatic wrapping on): every PDF row ends hidden without toggling anything.
+- [ ] Restart Obsidian: rows are hidden once the first scan has finished (a second or two after the layout appears).
+- [ ] Disable the plugin: every row reappears at once. Enable it again: rows are hidden again.
+- [ ] Same checks on a phone.
