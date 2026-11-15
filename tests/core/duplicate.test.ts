@@ -1,5 +1,5 @@
 import { expect, test } from 'vitest';
-import { duplicatePaths } from '../../src/core/duplicate.ts';
+import { duplicatePaths, leftoverMessage } from '../../src/core/duplicate.ts';
 import type { Snapshot } from '../../src/core/types.ts';
 
 const snap = (notePaths: string[], pdfPaths: string[]): Snapshot => ({ notePaths, pdfPaths, claims: [] });
@@ -34,4 +34,26 @@ test("keeps the PDF's own extension case", () => {
 
 test('a name taken in another folder does not count', () => {
 	expect(duplicatePaths('a/S.md', 'a/S.pdf', snap(['a/S.md', 'b/S 1.md'], ['a/S.pdf', 'b/S 1.pdf']))).toEqual({ note: 'a/S 1.md', pdf: 'a/S 1.pdf' });
+});
+
+const target = { note: 'a/S 1.md', pdf: 'a/S 1.pdf' };
+
+test('no leftover message when the PDF copy did not happen', () => {
+	expect(leftoverMessage({ pdf: false, note: false, claim: false }, target, 'wrapped-pdf')).toBeNull();
+});
+
+test('PDF copied without a note', () => {
+	expect(leftoverMessage({ pdf: true, note: false, claim: false }, target, 'wrapped-pdf')).toBe(
+		'Duplicating stopped part way. a/S 1.pdf was created without a note. It is a plain PDF; you can wrap it or delete it.',
+	);
+});
+
+test('both copied but the claim was not set', () => {
+	expect(leftoverMessage({ pdf: true, note: true, claim: false }, target, 'wrapped-pdf')).toBe(
+		'Duplicating stopped part way. a/S 1.md and a/S 1.pdf were created, but the note still points at the original PDF. Delete both, or set its "wrapped-pdf" property to the new PDF.',
+	);
+});
+
+test('no leftover message when everything completed', () => {
+	expect(leftoverMessage({ pdf: true, note: true, claim: true }, target, 'wrapped-pdf')).toBeNull();
 });

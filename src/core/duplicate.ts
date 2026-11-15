@@ -19,3 +19,17 @@ export function duplicatePaths(notePath: string, pdfPath: string, snapshot: Snap
 		if (!taken.has(note.toLowerCase()) && !taken.has(pdf.toLowerCase())) return { note, pdf };
 	}
 }
+
+/** What a duplication did before it stopped. */
+export interface DuplicateProgress {
+	pdf: boolean;
+	note: boolean;
+	claim: boolean;
+}
+
+/** The Notice that explains files a stopped duplication created, or null when it created none or finished. */
+export function leftoverMessage(done: DuplicateProgress, target: { note: string; pdf: string }, marker: string): string | null {
+	if (!done.pdf || done.claim) return null;
+	if (!done.note) return `Duplicating stopped part way. ${target.pdf} was created without a note. It is a plain PDF; you can wrap it or delete it.`;
+	return `Duplicating stopped part way. ${target.note} and ${target.pdf} were created, but the note still points at the original PDF. Delete both, or set its "${marker}" property to the new PDF.`;
+}

@@ -1,6 +1,7 @@
 import { Notice, type App, type TFile } from "obsidian";
-import { duplicatePaths } from "../core/duplicate.ts";
+import { duplicatePaths, leftoverMessage, type DuplicateProgress } from "../core/duplicate.ts";
 import { basename, filename, samePair } from "../core/paths.ts";
+import type { Action } from "../core/types.ts";
 import type { PdfWrapperSettings } from "../core/settings-data.ts";
 import type { Executor } from "./execute.ts";
 import { gatherSnapshot, readClaim } from "./snapshot.ts";
@@ -25,6 +26,7 @@ export async function duplicateWrapped(
 	executor: Executor,
 	settings: PdfWrapperSettings,
 	note: TFile,
+	onDone: () => void,
 ): Promise<void> {
 	const pdf = healthyPdf(app, settings, note);
 	if (!pdf) {
@@ -33,40 +35,44 @@ export async function duplicateWrapped(
 		);
 		return;
 	}
-	if (inFlight.has(note.path)) return;
+	if (inFlight.has(note.path)) {
+		new Notice(`${note.name} is already being duplicated.`);
+		return;
+	}
 	inFlight.add(note.path);
 	try {
 		const target = duplicatePaths(note.path, pdf.path, gatherSnapshot(app, settings.markerProperty));
 		const oldTargets = [...new Set([pdf.path, filename(pdf.path), basename(pdf.path)])];
-		let completed = false;
-		try {
-			completed = await executor.run([
-				{ type: "copy", from: pdf.path, to: target.pdf },
-				{ type: "copy", from: note.path, to: target.note },
-				{ type: "setClaim", notePath: target.note, pdfPath: target.pdf, oldTargets },
-			]);
-		} catch (error) {
-			console.error("PDF Wrapper: failed to duplicate", note.path, error);
+		const done: DuplicateProgress = { pdf: false, note: false, claim: false };
+		const steps: [keyof DuplicateProgress, Action][] = [
+			["pdf", { type: "copy", from: pdf.path, to: target.pdf }],
+			["note", { type: "copy", from: note.path, to: target.note }],
+			["claim", { type: "setClaim", notePath: target.note, pdfPath: target.pdf, oldTargets }],
+		];
+		let stopped = false;
+		for (const [step, action] of steps) {
+			try {
+				if (!(await executor.run([action]))) {
+					new Notice(`Could not duplicate ${note.name}: it changed while duplicating. Try again.`);
+					stopped = true;
+					break;
+				}
+				done[step] = true;
+			} catch (error) {
+				console.error("PDF Wrapper: failed to duplicate", note.path, error);
+				stopped = true;
+				break;
+			}
 		}
-		if (!completed) {
-			explainLeftovers(app, target);
+		if (stopped) {
+			const message = leftoverMessage(done, target, settings.markerProperty);
+			if (message) new Notice(message, 10000);
 			return;
 		}
 		const copy = app.vault.getFileByPath(target.note);
 		if (copy) await app.workspace.getLeaf(false).openFile(copy);
 	} finally {
 		inFlight.delete(note.path);
+		onDone();
 	}
-}
-
-/** After a stopped duplication, names whichever copies exist, so the vault's state is explained. */
-function explainLeftovers(app: App, target: { note: string; pdf: string }): void {
-	const left = [target.pdf, target.note].filter((path) => app.vault.getFileByPath(path) !== null);
-	if (left.length === 0) return;
-	const noteLeft = left.includes(target.note);
-	new Notice(
-		`Duplicating stopped part way. Left behind: ${left.join(" and ")}.` +
-			(noteLeft ? " The copied note may still point at the original PDF." : " It is a plain PDF; you can delete it."),
-		10000,
-	);
 }

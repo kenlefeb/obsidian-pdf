@@ -88,7 +88,7 @@ export default class PdfWrapperPlugin extends Plugin {
 			checkCallback: (checking) => {
 				const file = this.app.workspace.getActiveFile();
 				if (!file || !isNote(file.path) || !healthyPdf(this.app, this.settings, file)) return false;
-				if (!checking) void duplicateWrapped(this.app, executor, this.settings, file);
+				if (!checking) void duplicateWrapped(this.app, executor, this.settings, file, () => void store.refresh());
 				return true;
 			},
 		});
@@ -99,7 +99,7 @@ export default class PdfWrapperPlugin extends Plugin {
 					menu.addItem((item) => {
 						item.setTitle('Duplicate wrapped document')
 							.setIcon('copy')
-							.onClick(() => void duplicateWrapped(this.app, executor, this.settings, file));
+							.onClick(() => void duplicateWrapped(this.app, executor, this.settings, file, () => void store.refresh()));
 					});
 				}
 				if (file instanceof TFile && isPdf(file.path)) {
