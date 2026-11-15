@@ -61,13 +61,14 @@ export function planAutoWrap(
 
 /**
  * What became of one automatic wrap. `skipped` is a benign race (a note appeared at the last moment) and is silent.
- * `template-failed`: Templater left no note (its template failed or its prompt was cancelled); see `pausesAutoWrap`.
+ * `template-problem`: Templater handed back no note: it left none (its template failed or its prompt was cancelled),
+ * or notes appeared elsewhere that are only named; see `pausesAutoWrap`.
  */
 export type WrapOutcome =
 	| { kind: "wrapped"; name: string }
 	| { kind: "incomplete"; name: string; message: string }
 	| { kind: "failed"; message: string }
-	| { kind: "template-failed"; message: string }
+	| { kind: "template-problem"; message: string }
 	| { kind: "skipped" };
 
 /**
@@ -76,7 +77,7 @@ export type WrapOutcome =
  * until a later wrap succeeds.
  */
 export function pausesAutoWrap(outcome: WrapOutcome): boolean {
-	return outcome.kind === "template-failed";
+	return outcome.kind === "template-problem";
 }
 
 /** The notice for a pass that paused on `message` (which says what failed). */
@@ -112,7 +113,7 @@ export function summarizeWraps(outcomes: WrapOutcome[]): string[] {
 			? firstFailure.message
 			: `Could not wrap ${failed.length} PDFs. First problem: ${firstFailure.message} The rest are listed under documents needing attention.`);
 	}
-	const paused = outcomes.find((o): o is Extract<WrapOutcome, { kind: "template-failed" }> => o.kind === "template-failed");
+	const paused = outcomes.find((o): o is Extract<WrapOutcome, { kind: "template-problem" }> => o.kind === "template-problem");
 	if (paused) notices.push(pausedMessage(paused.message));
 	return notices;
 }

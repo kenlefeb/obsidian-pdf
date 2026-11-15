@@ -131,8 +131,8 @@ test('the stopped notice has one full stop after the reason, whether or not the 
 const TEMPLATE_FAILED = 'Templater did not create a note for S.pdf. Check its own message, fix the template or answer its prompt, then wrap again.';
 const PAUSE_TAIL = 'PDFs that are not wrapped are listed under documents needing attention.';
 
-test('only a template that left no note pauses automatic wrapping', () => {
-	expect(pausesAutoWrap({ kind: 'template-failed', message: TEMPLATE_FAILED })).toBe(true);
+test('only a Templater call that handed back no note pauses automatic wrapping', () => {
+	expect(pausesAutoWrap({ kind: 'template-problem', message: TEMPLATE_FAILED })).toBe(true);
 	expect(pausesAutoWrap({ kind: 'failed', message: 'nope.' })).toBe(false);
 	expect(pausesAutoWrap({ kind: 'wrapped', name: 'A' })).toBe(false);
 	expect(pausesAutoWrap({ kind: 'incomplete', name: 'A', message: 'oops.' })).toBe(false);
@@ -143,8 +143,8 @@ test('the paused notice quotes the message with one full stop, then the tail', (
 	expect(pausedMessage('no note')).toBe(`Automatic wrapping paused: no note. ${PAUSE_TAIL}`);
 });
 test('a pass that paused shows the paused notice once, after the wraps before it', () => {
-	expect(summarizeWraps([ok('A'), { kind: 'template-failed', message: TEMPLATE_FAILED }]))
+	expect(summarizeWraps([ok('A'), { kind: 'template-problem', message: TEMPLATE_FAILED }]))
 		.toEqual(['Wrapped A', `Automatic wrapping paused: ${TEMPLATE_FAILED} ${PAUSE_TAIL}`]);
-	expect(summarizeWraps([{ kind: 'template-failed', message: TEMPLATE_FAILED }]))
+	expect(summarizeWraps([{ kind: 'template-problem', message: TEMPLATE_FAILED }]))
 		.toEqual([`Automatic wrapping paused: ${TEMPLATE_FAILED} ${PAUSE_TAIL}`]);
 });

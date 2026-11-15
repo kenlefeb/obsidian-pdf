@@ -9,7 +9,7 @@ import {
 	type WrapOutcome,
 } from "../core/auto-wrap.ts";
 import type { PdfWrapperSettings } from "../core/settings-data.ts";
-import { onWrapSucceeded, WrapIncomplete, WrapMessage, WrapRefusal } from "../pdf-wrapper.ts";
+import { isTemplateProblem, onWrapSucceeded, WrapIncomplete, WrapMessage, WrapRefusal } from "../pdf-wrapper.ts";
 import type { Executor } from "./execute.ts";
 import { gatherSnapshot } from "./snapshot.ts";
 
@@ -35,9 +35,9 @@ const SLOW_WRAP_MS = 60000;
  * note that is about to arrive by sync wins). Wraps run one at a time, each judged against a snapshot taken after
  * the one before finished. Notices are summarised once per pass. Call `unload()` when the plugin unloads.
  *
- * When Templater leaves no note (the template failed or its prompt was cancelled), the pass pauses: the PDFs waiting
- * then are held, not tried again until some later wrap succeeds (a manual one, or an automatic one of a PDF that
- * arrives afterwards). They stay listed as "Not wrapped" meanwhile.
+ * When Templater hands back no note (the template failed, its prompt was cancelled, or notes appeared elsewhere that
+ * are only named), the pass pauses: the PDFs waiting then are held, not tried again until some later wrap succeeds
+ * (a manual one, or an automatic one of a PDF that arrives afterwards). They stay listed as "Not wrapped" meanwhile.
  */
 export class AutoWrapper {
 	/** PDF path to the time it becomes due; insertion order is arrival order. */
@@ -45,7 +45,7 @@ export class AutoWrapper {
 	private timer: number | null = null;
 	private running = false;
 	private unloaded = false;
-	/** PDFs that were waiting when a pass paused on a failing template. Held for this session only. */
+	/** PDFs that were waiting when a pass paused because Templater handed back no note. Held for this session only. */
 	private readonly held = new Set<string>();
 	private readonly stopListening: () => void;
 
@@ -181,7 +181,7 @@ export class AutoWrapper {
 			// The note arrived after the snapshot, or another wrap (a click, or "Wrap all") is creating it right now:
 			// someone else is wrapping it, which is what we wanted.
 			if (error instanceof WrapRefusal && (error.reason === "note-exists" || error.reason === "in-flight")) return { kind: "skipped" };
-			if (error instanceof WrapRefusal && error.reason === "template-failed") return { kind: "template-failed", message: error.message };
+			if (isTemplateProblem(error)) return { kind: "template-problem", message: error.message };
 			console.error("PDF Wrapper: could not wrap", path, error);
 			return { kind: "failed", message: error instanceof WrapMessage ? error.message : `Failed to wrap ${path}: ${reason(error)}` };
 		} finally {

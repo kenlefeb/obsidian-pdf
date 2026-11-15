@@ -5,7 +5,7 @@ import { classify } from "../core/classify.ts";
 import { buildAttention, bulkWrapChecker, fixesFor, isBulkFixable, isBulkWrappable, planFix } from "../core/fixes.ts";
 import { specificAttachmentFolder } from "../core/settings-data.ts";
 import type { AttentionItem, Classification, FixId, NoteClaim, Snapshot } from "../core/types.ts";
-import { WrapIncomplete, WrapMessage, WrapRefusal } from "../pdf-wrapper.ts";
+import { isTemplateProblem, WrapIncomplete, WrapMessage, WrapRefusal } from "../pdf-wrapper.ts";
 import type { Executor } from "./execute.ts";
 import { gatherSnapshot } from "./snapshot.ts";
 import { SETTLE_MS } from "./watcher.ts";
@@ -150,8 +150,8 @@ export class AttentionStore {
 	/**
 	 * Runs `pick`'s fix on each listed entry it accepts, one at a time, re-planning against a fresh snapshot
 	 * each time. Stops at the first failure. Wraps run quietly: a refused wrap (another wrap got there first, or the
-	 * PDF cannot be wrapped) is skipped without a notice, and only another failure (including Templater leaving no
-	 * note) is reported here and stops the run.
+	 * PDF cannot be wrapped) is skipped without a notice, and only another failure (including Templater handing back
+	 * no note) is reported here and stops the run.
 	 */
 	private bulkRun(
 		kind: "fix" | "wrap",
@@ -177,9 +177,9 @@ export class AttentionStore {
 						// Only a throw is a failure that stops the run.
 						counted = await this.executor.run(planFix(item, fix, snapshot, undefined, c), { skipAfterRun: true, quiet: kind === "wrap" });
 					} catch (error) {
-						if (error instanceof WrapRefusal && error.reason !== "template-failed") {
+						if (error instanceof WrapRefusal && !isTemplateProblem(error)) {
 							// Automatic wrapping (or a click) is wrapping it, its note appeared, or it cannot be wrapped: skip it.
-							// A template that failed in Templater would fail for every PDF, so that one stops the run below.
+							// Templater handing back no note would likely repeat for every PDF, so that one stops the run below.
 							continue;
 						}
 						if (error instanceof WrapIncomplete) {
