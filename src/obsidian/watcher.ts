@@ -1,5 +1,6 @@
 import { Notice, TFile, type CachedMetadata, type Plugin, type TAbstractFile } from "obsidian";
 import { claimChanged, parseClaim } from "../core/claims.ts";
+import { textLinksToPdf } from "../core/links.ts";
 import { isNote, isPdf } from "../core/paths.ts";
 import { react } from "../core/react.ts";
 import type { PdfWrapperSettings } from "../core/settings-data.ts";
@@ -20,6 +21,13 @@ export const SETTLE_MS = 2000;
  * later event would queue behind it. The Executor's execution-time checks remain the safety net.
  */
 export const IDLE_WAIT_MS = 10000;
+
+/**
+ * Before a PDF is deleted with its note, notes modified this recently are also read for a link to it, in case the
+ * metadata cache has not indexed that link yet. At most RECENT_NOTES_READ of them, the most recently modified first.
+ */
+const RECENT_EDIT_MS = 10000;
+const RECENT_NOTES_READ = 20;
 
 export interface WatcherDeps {
 	localIntent: LocalIntent;
@@ -184,12 +192,14 @@ export class Watcher {
 			// in this queue and can overlap with it; the wait is capped at IDLE_WAIT_MS so nothing can stall it for long.
 			await this.waitForIdle();
 			if (this.unloaded) return;
+			// Checked as late as possible, so a note that has just gained an embed of the PDF (a merge) is seen. Before
+			// the snapshot, because it reads files and so may wait.
+			if (event.kind === "delete" && event.local && event.claimedPdf !== null) {
+				event = { ...event, linkedElsewhere: await this.isLinkedElsewhere(event.claimedPdf, event.path) };
+				if (this.unloaded) return;
+			}
 			let snapshot = gatherSnapshot(this.plugin.app, this.deps.getSettings().markerProperty);
 			if (event.kind === "delete") snapshot = withoutPath(snapshot, event.path);
-			// Checked as late as possible, so a note that has just gained an embed of the PDF (a merge) is seen.
-			if (event.kind === "delete" && event.local && event.claimedPdf !== null) {
-				event = { ...event, linkedElsewhere: this.isLinkedElsewhere(event.claimedPdf, event.path) };
-			}
 			const reaction = react(event, snapshot);
 			// The create has been acted on (copied or explained): no second pass when the cache reports the note changed.
 			if (event.kind === "create" && reaction.actions.length > 0) this.pendingCreates.consume(event.path);
@@ -213,16 +223,28 @@ export class Watcher {
 	}
 
 	/**
-	 * True when a note other than `deletedNote` links to or embeds `pdfPath`, according to the metadata cache's
-	 * resolved links. Read-only. When the links cannot be read, answers true, so the PDF is kept.
+	 * True when a note other than `deletedNote` links to or embeds `pdfPath`, as far as the plugin can tell now. First
+	 * the metadata cache's resolved links; when they show nothing, the text of the notes modified in the last
+	 * RECENT_EDIT_MS, because the cache may not have indexed a link added moments ago (Note composer's merge writes the
+	 * target note, then deletes the source). Read-only. On any error, or when the plugin unloads meanwhile, answers
+	 * true, so the PDF is kept.
 	 */
-	private isLinkedElsewhere(pdfPath: string, deletedNote: string): boolean {
+	private async isLinkedElsewhere(pdfPath: string, deletedNote: string): Promise<boolean> {
 		try {
 			const { metadataCache, vault } = this.plugin.app;
 			for (const [source, targets] of Object.entries(metadataCache.resolvedLinks)) {
 				if (source === deletedNote || !Object.prototype.hasOwnProperty.call(targets, pdfPath)) continue;
 				// A note the cache still remembers but that is gone (deleted with the same folder) does not count.
 				if (vault.getFileByPath(source) !== null) return true;
+			}
+			const now = Date.now();
+			const recent = vault.getMarkdownFiles()
+				.filter((file) => file.path !== deletedNote && now - file.stat.mtime <= RECENT_EDIT_MS)
+				.sort((a, b) => b.stat.mtime - a.stat.mtime)
+				.slice(0, RECENT_NOTES_READ);
+			for (const file of recent) {
+				const text = await vault.cachedRead(file);
+				if (this.unloaded || textLinksToPdf(text, pdfPath)) return true;
 			}
 			return false;
 		} catch (error) {
