@@ -60,3 +60,13 @@ export function findPathIgnoringCase(paths: string[], path: string): string | nu
 export function pairKey(path: string): string {
 	return `${dirname(path)}/${basename(path)}`.toLowerCase();
 }
+
+/** Where a note's PDF sits: same folder, same base name. "a/B.md" -> "a/B.pdf". */
+export function pdfBeside(notePath: string): string {
+	return joinPath(dirname(notePath), `${basename(notePath)}.pdf`);
+}
+
+/** Where a PDF's note sits: same folder, same base name. "a/B.pdf" -> "a/B.md". */
+export function noteBeside(pdfPath: string): string {
+	return joinPath(dirname(pdfPath), `${basename(pdfPath)}.md`);
+}

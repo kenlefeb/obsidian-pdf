@@ -1,5 +1,5 @@
 import { expect, test } from "vitest";
-import { basename, dirname, extension, filename, isInFolder, isNote, findPathIgnoringCase, isPdf, joinPath, samePair } from "../../src/core/paths.ts";
+import { basename, dirname, extension, filename, isInFolder, isNote, findPathIgnoringCase, isPdf, joinPath, noteBeside, pdfBeside, samePair } from "../../src/core/paths.ts";
 
 test("root-level files", () => {
 	expect(dirname("Statement.pdf")).toBe("");
@@ -43,4 +43,12 @@ test("findPathIgnoringCase", () => {
 	expect(findPathIgnoringCase(["a/S.md"], "a/S.md")).toBe("a/S.md");
 	expect(findPathIgnoringCase(["a/S.pdf", "b/S.md"], "a/S.md")).toBeNull();
 	expect(findPathIgnoringCase([], "a/S.md")).toBeNull();
+});
+
+test("the PDF beside a note and the note beside a PDF", () => {
+	expect(pdfBeside("a/B.md")).toBe("a/B.pdf");
+	expect(noteBeside("a/B.pdf")).toBe("a/B.md");
+	expect(pdfBeside("B.md")).toBe("B.pdf");
+	expect(noteBeside("B.PDF")).toBe("B.md");
+	expect(pdfBeside("a.b/2024.01 Bank.v2.md")).toBe("a.b/2024.01 Bank.v2.pdf");
 });
