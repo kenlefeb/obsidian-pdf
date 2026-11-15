@@ -72,7 +72,10 @@ export class AttentionStore {
 		return this.scanned;
 	}
 
-	/** Rescans, adding `pendingRemoved` to the PDFs whose note was removed outside Obsidian. Never changes a vault file. */
+	/**
+	 * Rescans, adding `pendingRemoved` to the PDFs kept after their note was deleted (outside Obsidian, with following
+	 * deletes off, or while other notes link to the PDF). Never changes a vault file.
+	 */
 	refresh(pendingRemoved?: string[]): Promise<AttentionItem[]> {
 		return this.serial(() => this.rescan(pendingRemoved ?? []), () => this.items());
 	}

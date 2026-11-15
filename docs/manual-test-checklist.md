@@ -32,6 +32,7 @@ Run each item twice: once with Templater enabled, once with Templater disabled (
 - [ ] Wrap a PDF from its file-explorer menu ("Wrap PDF"). The note opens.
 - [ ] Open a PDF, then run "Wrap active PDF" from the command palette. The note opens.
 - [ ] "Wrap active PDF" is not offered when the active file is not a PDF, or when the PDF already has a note beside it.
+- [ ] The file-explorer menu of a PDF that already has a note beside it (a wrapped PDF, or one with an unmarked note of the same name) has no "Wrap PDF" item; a PDF without a note has it.
 - [ ] The note `<name>.md` appears in the same folder as the PDF.
 - [ ] The PDF did not move.
 - [ ] The note's frontmatter has the marker property (default `wrapped-pdf`) set to `[[<vault path to pdf>|<pdf file name>]]`, also when the template has no frontmatter.
@@ -45,9 +46,10 @@ Run each item twice: once with Templater enabled, once with Templater disabled (
 - [ ] Start a wrap from the file menu and immediately run "Wrap active PDF" on the same PDF: the second is refused with "<name> is already being wrapped." and only one note is created.
 - [ ] Wrap `Templates/Wrapped PDF.pdf` with no template set: the default template `Templates/Wrapped PDF.md` is created, then the wrap is refused with "Cannot wrap Wrapped PDF.pdf: its note would be the template file Templates/Wrapped PDF.md."
 - [ ] A note whose frontmatter mentions `![[<name>.pdf]]` in another property keeps that value unchanged; only body embeds are rewritten.
-- [ ] With Templater, a template that renames its own note (`tp.file.rename`) or moves it (`tp.file.move`): the note ends beside the PDF and is marked, the pair is intact (marker canonical) and nothing is renamed a second time. If the rename back fails (for example, the moved note's original path was taken meanwhile), the notice starts "Created <where the note is> but could not mark it". Confirms that `fileManager.renameFile` onto an existing path throws rather than overwrites.
+- [ ] With Templater, a template that renames its own note (`tp.file.rename`) or moves it (`tp.file.move`): the note ends beside the PDF and is marked, the pair is intact (marker canonical) and nothing is renamed a second time. If the rename back fails (for example, the moved note's original path was taken meanwhile), the notice starts "Failed to wrap <pdf name>: Created <where the note is> but could not mark it". Confirms that `fileManager.renameFile` onto an existing path throws rather than overwrites.
 - [ ] With Templater, a template whose code throws (for example `<% tp.user.missing() %>`): note what happens. Templater may show its own error. If Templater left the note behind, the plugin uses that note and marks it (the console shows "PDF Wrapper: Templater failed after creating the note"); otherwise it creates the note without Templater. Either way there is no "already exists" error. Record which happened and whether the note content is acceptable.
-- [ ] Failure after the note exists: with Templater, use a template whose frontmatter has `title: <% tp.file.title %>` (unquoted), and wrap a PDF named `Report: 2024.pdf`. The notice says `Failed to wrap Report: 2024.pdf: Created Report: 2024.md but could not mark it as wrapping Report: 2024.pdf: <reason>. Delete the note and wrap again, or add the "wrapped-pdf" property to it by hand.`, the note is still there without the marker, and after deleting it a second wrap (with a fixed template) works.
+- [ ] Failure after the note exists: with Templater, use a template whose frontmatter has `title: <% tp.file.title %>` (unquoted), and wrap a PDF named `@Report 2024.pdf`. The note's frontmatter becomes `title: @Report 2024`, which is not valid YAML (`@` may not start an unquoted value), so setting the marker fails. The notice says `Failed to wrap @Report 2024.pdf: Created @Report 2024.md but could not mark it as wrapping @Report 2024.pdf: <reason>. Delete the note and wrap again, or add the "wrapped-pdf" property to it by hand.`, the note is still there without the marker, and after deleting it a second wrap (with a fixed template, for example `title: "<% tp.file.title %>"`) works. If the marker is set anyway, Obsidian's frontmatter parser accepted the value: record that and the name used.
+- [ ] With Templater, if `create_new_note_from_template` returns no note and none is beside the PDF (a template that moves its own note elsewhere; may not be reproducible, skip if you cannot): the notice reads `Failed to wrap <pdf name>: Templater created the note somewhere else and it could not be found. Look for a new note, move it beside <pdf name>, and add the "wrapped-pdf" property — or change the template so it does not rename or move its note.`, and no second note is created beside the PDF.
 - [ ] If opening the new note fails (hard to force; skip if you cannot), the notice reads "Wrapped <pdf> as <note>, but could not open the note: …" with no "Failed to wrap" prefix, and the PDF counts as wrapped.
 - [ ] If the embed rewrite fails after the marker is written (hard to force; skip if you cannot), the notice reads "Created and marked <note>, but could not update its PDF embed: …" with no "Failed to wrap" prefix, and the note carries the marker.
 
@@ -63,6 +65,7 @@ Run each item twice: once with Templater enabled, once with Templater disabled (
 - [ ] Wrapping again with the repaired template adds nothing, shows no "Updated the template" notice, and does not change the template's modified time.
 - [ ] A folder named like the template path (for example a folder `Templates/Wrapped PDF.md`) makes the wrap fail with a notice naming that path.
 - [ ] If saving settings fails after the default is created (hard to force; skip if you cannot), the notice says "Created a default template at <path>, but could not save it as the template setting: …".
+- [ ] Marker property setting: with automatic wrapping on, type a new name slowly (for example `pdf-doc`) and drop a PDF in while typing. Nothing is saved until you leave the field (click elsewhere, or close the settings): the template gains no partial name such as `pd:`, and the new note is marked with the old name. After you leave the field, the list refreshes at once (notes with the old name are no longer recognised). Empty the field and leave it: it shows `wrapped-pdf` again and that name is used.
 
 ## Following in-app changes
 
@@ -78,13 +81,16 @@ note" on (the defaults), on desktop and on a phone.
 - [ ] Rename a note onto a name whose PDF already exists in that folder (for example rename `A.md` to `B.md` where `B.pdf` exists but `B.md` does not): a notice says the PDF could not be renamed because a file with that name already exists, `B.pdf` is unchanged, and `A.pdf` is still there.
 - [ ] Same, where the existing name differs only in letter case (`b.pdf` exists, rename `A.md` to `B.md`), on macOS or Windows: notice, nothing overwritten.
 - [ ] Case-only rename of a wrapped note (`report.md` to `Report.md`) on macOS or Windows: the PDF becomes `Report.pdf`, no notice, nothing lost.
-- [ ] Move a folder holding several pairs (drag it into another folder), and rename a folder holding pairs: no error notice, both files of every pair end up together, every embed still renders, every marker points at the new path, and nothing lands in the trash.
+- [ ] Move a folder holding several pairs (drag it into another folder), and rename a folder holding pairs: no error notice, both files of every pair end up together, every embed still renders, every marker points at the new path, and nothing lands in the trash. If Obsidian has already updated a marker to the new path, the plugin does not write that note again (with a sync service, each note shows one change, not two).
 - [ ] Delete a wrapped note: the PDF is deleted the same way (check the system trash or the vault's `.trash` folder, per Settings → Files and links → Deleted files).
 - [ ] Delete a wrapped note whose PDF another note also claims: the PDF stays.
+- [ ] Merge a wrapped note `A.md` into another note `B.md` with the core Note composer ("Merge entire file with…"): `B.md` now embeds `A.pdf`, `A.md` is deleted, `A.pdf` stays, a notice says "Kept A.pdf: other notes still link to it.", B's embed still shows the PDF, and `A.pdf` is listed with "Its note was deleted; the PDF was kept". Repeat with a plain note that embeds `![[A.pdf]]` (or links `[[A.pdf]]`) and deleting the wrapped note `A.md` from the explorer: same result.
+- [ ] Delete a wrapped note whose PDF no other note links to: the PDF is still deleted as before (the link check does not keep every PDF).
 - [ ] Delete a folder holding several pairs: no "Could not delete" or other error notice, every pair is gone together, and nothing from it lands in the trash outside that folder (the trash holds the folder, not loose files).
 - [ ] Delete only the PDF of a pair: the note stays.
 - [ ] Turn "Delete the PDF when its note is deleted in Obsidian" off, delete a wrapped note in Obsidian: the PDF stays and is listed with "Its note was deleted; the PDF was kept".
 - [ ] Turn "Rename and move the PDF with its note" off, rename a wrapped note in Obsidian: the PDF is not renamed.
+- [ ] Unwrap a document by deleting its `wrapped-pdf` property in the properties panel (no rename, create or delete): within a couple of seconds the PDF's row reappears in the file explorer and the note loses its "PDF" marker. Add the property back (or undo): the row is hidden again within a couple of seconds. Typing in the body of a wrapped note causes no visible refresh or flicker.
 
 ### Assumptions about Obsidian the code relies on (unverified; confirm each)
 
@@ -101,6 +107,9 @@ in the checks above are the evidence.)
 - [ ] `fileManager.renameFile` onto an existing path throws rather than overwrites (the plugin checks first, so this only matters if the check races).
 - [ ] A case-only rename through `fileManager.renameFile` works on macOS and Windows, and `vault.getAbstractFileByPath` returns either nothing or the file itself for the new spelling.
 - [ ] `fileManager.trashFile` fires `vault` `delete` for the PDF (synchronously or not); the plugin then ignores it as its own change.
+- [ ] `metadataCache` `changed` fires after a property is deleted in the properties panel, and after sync delivers a modified note (the unwrap check above and its second-device version below depend on it).
+- [ ] Note composer's merge deletes the merged note through `Vault.trash` or `Vault.delete` (so it reads as local), and by the time the plugin handles that delete, `metadataCache.resolvedLinks` already lists the new embed in the target note. If the cache lags, the PDF would be deleted: report it.
+- [ ] Whether `metadataCache.resolvedLinks` includes links held in another note's frontmatter properties (for example `attachments: "[[A.pdf]]"`), or only body links: delete a wrapped note whose PDF only another note's property links to, and record whether the PDF was kept.
 - [ ] Deleting a note fires `metadataCache` `deleted` with the note's previous cache (including frontmatter), and `metadataCache.getFirstLinkpathDest(<claim>, <deleted note path>)` still resolves the claimed PDF at that moment.
 - [ ] `metadataCache` `deleted` fires for notes only (not for PDFs), so each deletion is handled once.
 - [ ] Deleting a folder: by the time the plugin handles the note's deletion, the PDF is already gone from Obsidian's file list (no "Could not delete" notice).
@@ -115,18 +124,19 @@ notice appears. "Check wrapped documents" runs it on demand and opens the list; 
 attention" opens the list as last checked.
 
 - [ ] Delete a wrapped note in Finder (or Explorer) with Obsidian open: the PDF stays, and within a few seconds it is listed with "Its note was deleted; the PDF was kept". Restart Obsidian: the entry is still there. On three such entries, check each fix: "Keep as a plain PDF" removes the entry and changes no file; "Wrap" wraps it again; "Delete the PDF" first asks for confirmation naming the PDF, then deletes it as the "Deleted files" setting says.
-- [ ] Delete a wrapped note in Finder, then delete its PDF in Finder too: the "note removed" entry disappears by itself (run "Check wrapped documents" if the list is not open).
-- [ ] Delete a wrapped note in Finder with Obsidian open, wait for its "note removed" entry, then copy the note back in Finder: on the next check the entry clears. Clicking "Delete the PDF" (and confirming) before it clears is refused with "A note named <note> now exists beside this PDF. Check the list again." and the PDF stays.
+- [ ] Delete a wrapped note in Finder, then delete its PDF in Finder too: the "Its note was deleted; the PDF was kept" entry disappears by itself (run "Check wrapped documents" if the list is not open).
+- [ ] Delete a wrapped note in Finder with Obsidian open, wait for its "Its note was deleted; the PDF was kept" entry, then copy the note back in Finder: on the next check the entry clears. Clicking "Delete the PDF" (and confirming) before it clears is refused with "A note named <note> now exists beside this PDF. Check the list again." and the PDF stays.
 - [ ] Rename a wrapped note in Finder with Obsidian open: the PDF is not renamed, and the pair is listed.
-- [ ] With Obsidian closed, rename a wrapped note in Finder. On launch a notice "1 wrapped document needs attention" appears; clicking it opens the list, where the note is listed with "PDF has a different name: <old name>.pdf". Nothing changed on disk before you click a fix. "Rename PDF to match" fixes it and the entry disappears.
+- [ ] With Obsidian closed, rename a wrapped note in Finder. On launch a notice "1 document needs attention" appears; clicking it opens the list, where the note is listed with "PDF has a different name: <old name>.pdf". Nothing changed on disk before you click a fix. "Rename PDF to match" fixes it and the entry disappears.
 - [ ] With Obsidian closed, move a wrapped note to another folder in Finder: listed with "PDF is in another folder: <folder>"; "Move PDF beside note" fixes it.
 - [ ] "Make a copy" of a wrapped note in Finder: the copy is listed with "Points at another document's PDF", the original is not listed and is unchanged; "Copy the PDF" gives the copy its own PDF and the entry disappears.
 - [ ] A note whose PDF is missing (delete the PDF in Finder): listed with "PDF not found. It may not have downloaded yet."; "Choose a PDF" lists candidate PDFs (unclaimed ones beside the note first) and pairing with one works; with no candidates the button is disabled with the tooltip "No candidate PDFs found" (on desktop) and the row also shows "No candidate PDFs found" as a line.
 - [ ] Leave the list open, change a listed document in Finder so its entry no longer applies (for example rename the note back), then click its fix: a notice says "This has changed since it was listed. Check the list again." and the list refreshes. Nothing else changes.
 - [ ] With several misnamed or displaced entries, one of which cannot be fixed (for example make its destination folder read-only, or lock the PDF in another app on Windows): "Fix all" fixes the others up to that one, shows the failure notice, then "Stopped after fixing <n> documents." and lists what is left.
-- [ ] "Fix all" with nothing blocking: "Fixed <n> documents." and every misnamed or displaced entry with a single claimant is gone. Neither "Fix all" nor "Wrap all" appears when it would do nothing.
+- [ ] "Fix all" with nothing blocking: "Fixed <n> documents." and every misnamed or displaced entry with a single claimant is gone. "Fix all" appears only when such an entry is listed, and "Wrap all" only when a "Not wrapped" entry is listed.
 - [ ] With nothing broken, the list says "Everything is in order." and no startup notice appears.
 - [ ] Run "Show documents needing attention" straight after launch, before the startup check has run: the list says "Checking…" and then fills in.
+- [ ] If that first check fails (hard to force; skip if you cannot), the list says "Could not check wrapped documents. Close this and try again." instead of staying on "Checking…".
 - [ ] On a phone: the list opens from the command palette, long names wrap instead of overflowing, every button is easy to tap (at least 44px tall), and each fix works.
 - [ ] Open the list, then disable PDF Wrapper in Settings → Community plugins: the list closes (and so does an open "Delete the PDF?" confirmation or PDF chooser). Repeat, clicking a fix (or confirming "Delete the PDF") just before disabling: no file changes after the plugin is disabled.
 
@@ -144,8 +154,13 @@ The switch is Settings → PDF Wrapper → "Wrap new PDFs automatically". It is 
 - [ ] Wrap with a template that makes the embed update fail (so the wrap is incomplete): the PDF is wrapped, one notice with the problem, and no "Wrapped <name>" for it.
 - [ ] Toggle off during the settle period (within two seconds of dropping a PDF): the PDF is not wrapped.
 - [ ] Disable the plugin within two seconds of dropping a PDF: nothing is wrapped afterwards.
+- [ ] Enable the plugin and disable it again at once, before Obsidian's layout has finished loading (for example at startup; skip if you cannot time it): no "PDF Wrapper:" errors in the console, no startup notice, and no rows hidden.
 - [ ] Leave a Templater prompt open during an automatic wrap: after 60 seconds the console shows a "PDF Wrapper:" warning; the wrap is not abandoned and later PDFs wait.
 - [ ] A PDF added while Obsidian was closed appears as "Not wrapped" in the list with "Wrap all", and is not wrapped on its own at startup.
+- [ ] Wrap all while automatic wrapping runs: copy 10 PDFs into the vault folder from Finder, open the list within a few seconds (they are listed as "Not wrapped"), and click "Wrap all" while the automatic wraps start (15 to 30 s after arrival). No "is already being wrapped" or "a note already exists" notice appears, the run does not stop, every PDF ends with exactly one note, and the final notice counts only the PDFs "Wrap all" wrapped.
+- [ ] A PDF with an unmarked note of the same name beside it (create `X.md` without the marker, then add `X.pdf`) is not listed as "Not wrapped", is not wrapped automatically, and does not make "Wrap all" stop.
+- [ ] Click "Wrap PDF" on a PDF just as automatic wrapping wraps it (or the reverse): one note results, and automatic wrapping shows no failure notice for it (the click may say "<name> is already being wrapped.").
+- [ ] Make automatic wrapping stop on an unexpected error (hard to force; skip if you cannot): the notice ends "PDFs that are not wrapped are listed under documents needing attention."
 - [ ] Toggle off: no "Not wrapped" entries are listed, and the list refreshes straight away when the switch is flipped.
 - [ ] The toggle state differs per device: turn it on here, check another device still has it off.
 
@@ -186,6 +201,7 @@ Obsidian Sync, both "follow" settings on.
 - [ ] Obsidian Sync and iCloud apply remote renames and deletes without going through `Vault.rename`, `Vault.trash` or `Vault.delete` (otherwise a receiving device would act on them; the two follow settings are the remedy). Record, per sync service, whether device B ever acted on a remote change.
 - [ ] With two devices both on, add a PDF on one: exactly one note results, on both devices. Record how long the second device waited before it wrapped. Expected: 15 to 30 seconds. A wait of about 2 seconds means sync delivered the PDF through a path the plugin reads as in-app, so the cross-device margin is gone: report it. Also note whether it ever wrapped the PDF itself. Repeat with the PDF saved into iCloud from a third app so both see it from outside at the same moment; repeat 5 times and count duplicate notes.
 - [ ] Two devices on and a PDF arriving on both: the later device does not show a failure notice for the note that already exists (it silently skips).
+- [ ] On device A, unwrap a document by deleting its `wrapped-pdf` property in the properties panel; on device B, once sync has delivered the note, the PDF row reappears within a couple of seconds without a restart. Repeat with "Remove the claim" and with "Choose a PDF" run from the list on A.
 - [ ] A PDF that iCloud has not downloaded yet is listed as missing with "It may not have downloaded yet.", nothing is deleted, and the entry clears once it downloads.
 
 ## After an Obsidian update

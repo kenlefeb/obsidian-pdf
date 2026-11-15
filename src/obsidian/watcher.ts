@@ -26,7 +26,10 @@ export interface WatcherDeps {
 	own: OwnChanges;
 	executor: Executor;
 	getSettings: () => PdfWrapperSettings;
-	/** Called once per settle window, with every PDF whose note was removed outside Obsidian in it (often none). */
+	/**
+	 * Called once per settle window, with every PDF kept in it after its note was deleted (outside Obsidian, with
+	 * following deletes off, or while other notes link to the PDF); often none.
+	 */
 	onRecheck: (pendingRemoved: string[]) => void;
 	/**
 	 * Called for every PDF that appears and is not the plugin's own change; the receiver decides whether to act.

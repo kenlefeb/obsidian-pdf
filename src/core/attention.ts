@@ -51,7 +51,8 @@ export function fixLabel(fix: FixId): string {
 }
 
 /**
- * The PDFs whose note was removed outside Obsidian that are still worth asking about: the saved list plus
+ * The PDFs kept after their note was deleted (removed outside Obsidian, deleted in Obsidian with following deletes
+ * off, or deleted while other notes still link to the PDF) that are still worth asking about: the saved list plus
  * `added`, in that order, without duplicates, keeping only PDFs that are still unwrapped.
  */
 export function nextPendingRemoved(saved: string[], added: string[], unwrappedPdfs: string[]): string[] {
