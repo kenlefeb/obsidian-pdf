@@ -71,7 +71,7 @@ The design intent is that the plugin renames, moves and deletes a partner file o
 
 There are two deliberate exceptions:
 
-- Automatic wrapping creates a note for a PDF that arrives from outside (after 15 to 30 seconds). It runs your template, including any Templater code, without you present, and a template that prompts will hold up the queue until it is answered.
+- Automatic wrapping creates a note for a PDF that arrives from outside (after 15 to 30 seconds). It runs your template, including any Templater code, without you present, and a template that prompts will hold up the queue until it is answered. If Templater leaves no note (the template fails or you cancel its prompt), automatic wrapping pauses with one notice: the PDFs waiting then stay listed as "Not wrapped" and are tried again only after a later wrap succeeds (one you start, or an automatic one for a PDF that arrives afterwards).
 - Fixes you click in the Needs attention list change files. **Fix all** renames and moves files in bulk without asking for each one.
 
 A scan never changes files. It runs a couple of seconds after startup and when you run **Check wrapped documents**.
@@ -126,7 +126,7 @@ You do not have to set anything up.
 
 Placeholders are resolved by Templater when it is installed. Otherwise the core Templates placeholders `{{title}}`, `{{date}}` and `{{time}}` are used.
 
-With Templater, if Templater finishes without leaving a new note (expected when the template's code fails or you cancel one of its prompts; Templater shows its own message), the plugin says "Templater did not create a note for <PDF name>. Check its own message, fix the template or answer its prompt, then wrap again." Nothing is created and the PDF stays unwrapped. If the template renames or moves its own note, the plugin moves the note back beside the PDF and marks it; when it cannot tell which new note is the one Templater made (for example because another wrap ran at the same time), it names the new notes so you can move the right one by hand.
+With Templater, if Templater finishes without leaving a new note (expected when the template's code fails or you cancel one of its prompts; Templater shows its own message), the plugin says "Templater did not create a note for <PDF name>. Check its own message, fix the template or answer its prompt, then wrap again." Nothing is created and the PDF stays unwrapped. If the template renames or moves its own note and Templater does not return it, the plugin moves that note back beside the PDF and marks it only when it can tell the note is the one Templater just made: it is the only note created while Templater ran (a note merely renamed meanwhile does not count), no other wrap was running, and it carries the marker property without pointing at another PDF. It then says "Moved <old path> beside <PDF name>." Otherwise it changes nothing and tells you where to look, naming the new notes. The same applies when Templater fails after moving its note: no second note is created.
 
 The plugin no longer reads or writes the `attachment` / `attachments` properties. If you like to keep an `attachments` list, put it in your template; Obsidian's link updating can keep it current on rename, but that relies on its "Automatically update internal links" setting and has not been checked for links inside properties.
 
