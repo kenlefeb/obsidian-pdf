@@ -1,5 +1,5 @@
 import { expect, test } from "vitest";
-import { rewriteEmbeds } from "../../src/core/embeds.ts";
+import { rewriteBodyEmbeds, rewriteEmbeds } from "../../src/core/embeds.ts";
 
 test("rewrites bare, extensionless and full-path embeds", () => {
 	const out = rewriteEmbeds("x ![[S.pdf]] y ![[S]] z ![[old/S.pdf]]", ["old/S.pdf", "S.pdf", "S"], "new/T.pdf");
@@ -37,4 +37,13 @@ test("keeps an alias-only embed's alias", () => {
 
 test("keeps a placeholder's subpath", () => {
 	expect(rewriteEmbeds("![[{{title}}.pdf#page=2]]", [], "a/S.pdf")).toBe("![[a/S.pdf#page=2]]");
+});
+
+test("rewriteBodyEmbeds leaves the frontmatter alone", () => {
+	const t = '---\ncover: "![[S.pdf]]"\n---\n![[S.pdf]]\n';
+	expect(rewriteBodyEmbeds(t, ["S.pdf"], "a/S.pdf")).toBe('---\ncover: "![[S.pdf]]"\n---\n![[a/S.pdf]]\n');
+});
+
+test("rewriteBodyEmbeds rewrites the whole text when there is no frontmatter", () => {
+	expect(rewriteBodyEmbeds("![[{{title}}.pdf]]", [], "a/S.pdf")).toBe("![[a/S.pdf]]");
 });

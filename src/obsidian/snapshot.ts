@@ -1,6 +1,6 @@
 import type { App, TFile } from "obsidian";
 import { formatClaim, parseClaim } from "../core/claims.ts";
-import { rewriteEmbeds } from "../core/embeds.ts";
+import { rewriteBodyEmbeds } from "../core/embeds.ts";
 import { isNote, isPdf } from "../core/paths.ts";
 import type { NoteClaim, Snapshot } from "../core/types.ts";
 
@@ -35,8 +35,9 @@ export function gatherSnapshot(app: App, markerProperty: string): Snapshot {
 
 /**
  * Sets the marker property to the canonical claim for `pdfPath` (creating the frontmatter block if the note
- * has none), then points embeds of any of `oldTargets`, and template placeholders, at `pdfPath`.
- * The two writes run one after the other so they cannot overwrite each other.
+ * has none), then points embeds of any of `oldTargets`, and template placeholders, in the note body at `pdfPath`.
+ * The frontmatter is left as `processFrontMatter` wrote it. The two writes run one after the other so they
+ * cannot overwrite each other.
  */
 export async function writeClaim(
 	app: App,
@@ -48,5 +49,5 @@ export async function writeClaim(
 	await app.fileManager.processFrontMatter(note, (frontmatter: Record<string, unknown>) => {
 		frontmatter[markerProperty] = formatClaim(pdfPath);
 	});
-	await app.vault.process(note, (text) => rewriteEmbeds(text, oldTargets, pdfPath));
+	await app.vault.process(note, (text) => rewriteBodyEmbeds(text, oldTargets, pdfPath));
 }

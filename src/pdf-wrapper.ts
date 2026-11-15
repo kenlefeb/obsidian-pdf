@@ -1,6 +1,6 @@
 import { App, normalizePath, Notice, TFile, TFolder, type TAbstractFile } from "obsidian";
 import { isLinkSafeName } from "./core/claims.ts";
-import { dirname, isNote, joinPath } from "./core/paths.ts";
+import { dirname, findPathIgnoringCase, isNote, joinPath } from "./core/paths.ts";
 import type { PdfWrapperSettings } from "./core/settings-data.ts";
 import {
 	defaultTemplate,
@@ -10,14 +10,37 @@ import {
 } from "./core/template.ts";
 import { writeClaim } from "./obsidian/snapshot.ts";
 
+/** A wrap that was refused before anything was changed. Its message is complete and shown as it is. */
+export class WrapRefusal extends Error {
+	constructor(message: string) {
+		super(message);
+		this.name = "WrapRefusal";
+	}
+}
+
+/** Paths of the PDFs being wrapped right now, so a second wrap of the same PDF is refused. */
+const inFlight = new Set<string>();
+
 /** Where the note wrapping `pdf` lives: beside it, with the same base name. */
 export function siblingNotePath(pdf: TFile): string {
 	return joinPath(dirname(pdf.path), `${pdf.basename}.md`);
 }
 
 /**
+ * The path of whatever already occupies the PDF's note path, ignoring letter case (as a case-insensitive
+ * file system would), or null when it is free.
+ */
+export function existingSiblingNote(app: App, pdf: TFile): string | null {
+	const notePath = siblingNotePath(pdf);
+	if (app.vault.getAbstractFileByPath(notePath)) return notePath;
+	const siblings = pdf.parent?.children.map((child) => child.path) ?? [];
+	return findPathIgnoringCase(siblings, notePath);
+}
+
+/**
  * Creates `<name>.md` beside the PDF from the template and marks it with the claim.
- * The PDF is not moved. Throws an Error with a user-facing message on any failure.
+ * The PDF is not moved. Throws a WrapRefusal when it refuses before changing anything, and an Error
+ * with a user-facing message, describing what was left behind, on any other failure.
  */
 export async function wrapPdf(
 	app: App,
@@ -26,32 +49,78 @@ export async function wrapPdf(
 	pdfFile: TFile,
 	options: { open: boolean },
 ): Promise<TFile> {
+	if (inFlight.has(pdfFile.path)) {
+		throw new WrapRefusal(`${pdfFile.name} is already being wrapped.`);
+	}
+	inFlight.add(pdfFile.path);
+	const pdfPath = pdfFile.path;
+	try {
+		return await wrapOnce(app, settings, saveSettings, pdfFile, options);
+	} finally {
+		inFlight.delete(pdfPath);
+	}
+}
+
+async function wrapOnce(
+	app: App,
+	settings: PdfWrapperSettings,
+	saveSettings: () => Promise<void>,
+	pdfFile: TFile,
+	options: { open: boolean },
+): Promise<TFile> {
 	if (!isLinkSafeName(pdfFile.path)) {
-		throw new Error(`Cannot wrap ${pdfFile.name}: file names containing [ ] | # ^ cannot be linked. Rename the PDF first.`);
+		throw new WrapRefusal(`Cannot wrap ${pdfFile.name}: file names containing [ ] | # ^ cannot be linked. Rename the PDF first.`);
 	}
 
 	const folder = pdfFile.parent;
 	if (!folder) throw new Error(`Cannot determine the folder of ${pdfFile.path}.`);
 
 	const notePath = siblingNotePath(pdfFile);
-	if (app.vault.getAbstractFileByPath(notePath)) {
-		throw new Error(`A note already exists at ${notePath}.`);
+	const occupied = existingSiblingNote(app, pdfFile);
+	if (occupied) {
+		throw new WrapRefusal(`Cannot wrap ${pdfFile.name}: a note already exists at ${occupied}.`);
 	}
 
 	const templateFile = await prepareTemplate(app, settings, saveSettings);
-
-	const note = await createNoteFromTemplate(app, templateFile, folder, pdfFile.basename);
-	if (note.path !== notePath) {
-		// A template that renames or moves the note it creates: put it back beside the PDF.
-		await app.fileManager.renameFile(note, notePath);
+	if (templateFile.path.toLowerCase() === notePath.toLowerCase()) {
+		throw new WrapRefusal(`Cannot wrap ${pdfFile.name}: its note would be the template file ${templateFile.path}.`);
 	}
 
-	await writeClaim(app, note, settings.markerProperty, pdfFile.path, [pdfFile.name, pdfFile.basename]);
+	let note: TFile;
+	try {
+		note = await createNoteFromTemplate(app, templateFile, folder, pdfFile.basename);
+	} catch (e) {
+		// Templater may have created the file before failing.
+		const left = app.vault.getAbstractFileByPath(notePath);
+		if (left instanceof TFile) throw notMarked(left.path, pdfFile, e);
+		throw new Error(`Could not create ${notePath}: ${reason(e)}.`);
+	}
+
+	try {
+		if (note.path !== notePath) {
+			// A template that renames or moves the note it creates: put it back beside the PDF.
+			await app.fileManager.renameFile(note, notePath);
+		}
+		await writeClaim(app, note, settings.markerProperty, pdfFile.path, [pdfFile.name, pdfFile.basename]);
+	} catch (e) {
+		throw notMarked(note.path, pdfFile, e);
+	}
 
 	if (options.open) {
-		await app.workspace.getLeaf().openFile(note);
+		try {
+			await app.workspace.getLeaf().openFile(note);
+		} catch (e) {
+			throw new Error(`Wrapped ${pdfFile.name} as ${note.path}, but could not open the note: ${reason(e)}.`);
+		}
 	}
 	return note;
+}
+
+/** The note exists but carries no claim. It is not deleted: the message tells the user what to do. */
+function notMarked(notePath: string, pdfFile: TFile, e: unknown): Error {
+	return new Error(
+		`Created ${notePath} but could not mark it as wrapping ${pdfFile.name}: ${reason(e)}. Fix or delete the note, then wrap again.`,
+	);
 }
 
 /**
@@ -77,8 +146,16 @@ export async function prepareTemplate(
 			? asTemplateFile(existing, path)
 			: await createDefaultTemplate(app, path, settings.markerProperty);
 		// The settings tab stores the path without ".md".
+		const previous = settings.templatePath;
 		settings.templatePath = path.replace(/\.md$/i, "");
-		await saveSettings();
+		try {
+			await saveSettings();
+		} catch (e) {
+			settings.templatePath = previous;
+			throw new Error(existing
+				? `Found a template at ${path}, but could not save it as the template setting: ${reason(e)}.`
+				: `Created a default template at ${path}, but could not save it as the template setting: ${reason(e)}.`);
+		}
 		if (!existing) new Notice(`Created a default template at ${path}.`);
 	} else {
 		path = normalizePath(templatePathWithExtension(settings.templatePath));
@@ -91,17 +168,22 @@ export async function prepareTemplate(
 		}
 	}
 
-	let added: ("marker" | "embed")[];
+	let added: ("marker" | "embed")[] = [];
 	try {
-		const check = ensureTemplateComponents(await app.vault.read(file), settings.markerProperty);
-		added = check.added;
-		if (added.length > 0) await app.vault.modify(file, check.text);
+		// Read first so an intact template is not rewritten; the change itself is computed inside process.
+		if (ensureTemplateComponents(await app.vault.read(file), settings.markerProperty).added.length > 0) {
+			await app.vault.process(file, (text) => {
+				const check = ensureTemplateComponents(text, settings.markerProperty);
+				added = check.added;
+				return check.text;
+			});
+		}
 	} catch (e) {
 		throw new Error(`Could not update the template ${path}: ${reason(e)}.`);
 	}
 	if (added.length > 0) {
 		const parts = added.map((part) =>
-			part === "marker" ? `the marker property \`${settings.markerProperty}\`` : "a PDF embed");
+			part === "marker" ? `the marker property "${settings.markerProperty}"` : "a PDF embed");
 		new Notice(`Updated the template ${path}: added ${parts.join(" and ")}.`);
 	}
 

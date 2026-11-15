@@ -46,3 +46,9 @@ export function samePair(notePath: string, pdfPath: string): boolean {
 		&& dirname(notePath) === dirname(pdfPath)
 		&& basename(notePath) === basename(pdfPath);
 }
+
+/** The entry of `paths` equal to `path` ignoring letter case, as a case-insensitive file system would see it, or null. */
+export function findPathIgnoringCase(paths: string[], path: string): string | null {
+	const wanted = path.toLowerCase();
+	return paths.find((p) => p.toLowerCase() === wanted) ?? null;
+}

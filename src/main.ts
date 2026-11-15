@@ -1,7 +1,7 @@
 import { Notice, Plugin, TFile } from 'obsidian';
 import { mergeSettings, type PdfWrapperSettings } from "./core/settings-data.ts";
 import { PdfWrapperSettingTab } from "./settings.ts";
-import { siblingNotePath, wrapPdf } from "./pdf-wrapper.ts";
+import { existingSiblingNote, wrapPdf, WrapRefusal } from "./pdf-wrapper.ts";
 import { isPdf } from "./core/paths.ts";
 import { LocalIntent } from "./obsidian/local-intent.ts";
 import { registerSpike } from "./spike/spike.ts";
@@ -22,7 +22,7 @@ export default class PdfWrapperPlugin extends Plugin {
 			checkCallback: (checking) => {
 				const file = this.app.workspace.getActiveFile();
 				if (!file || !isPdf(file.path)) return false;
-				if (this.app.vault.getAbstractFileByPath(siblingNotePath(file))) return false;
+				if (existingSiblingNote(this.app, file)) return false;
 				if (!checking) void this.handleWrapPdf(file);
 				return true;
 			},
@@ -48,6 +48,10 @@ export default class PdfWrapperPlugin extends Plugin {
 			await wrapPdf(this.app, this.settings, () => this.saveSettings(), pdfFile, { open: true });
 			new Notice(`Wrapped ${pdfFile.basename}`);
 		} catch (e) {
+			if (e instanceof WrapRefusal) {
+				new Notice(e.message);
+				return;
+			}
 			new Notice(`Failed to wrap ${pdfFile.name}: ${e instanceof Error ? e.message : String(e)}`);
 			console.error('PDF Wrapper: failed to wrap', pdfFile.path, e);
 		}

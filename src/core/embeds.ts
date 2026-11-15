@@ -1,3 +1,5 @@
+import { bodyOffset } from "./frontmatter.ts";
+
 const EMBED = /!\[\[([^\]|#]*)(#[^\]|]*)?(\|[^\]]*)?\]\]/g;
 const PLACEHOLDER = /^\{\{(?:file|title)\}\}(?:\.pdf)?$/i;
 
@@ -14,4 +16,10 @@ export function rewriteEmbeds(content: string, oldTargets: string[], pdfPath: st
 		if (!targets.has(name.toLowerCase()) && !PLACEHOLDER.test(name)) return whole;
 		return `![[${pdfPath}${subpath ?? ""}${alias ?? ""}]]`;
 	});
+}
+
+/** `rewriteEmbeds` applied to the body only; the frontmatter block is kept byte for byte. */
+export function rewriteBodyEmbeds(content: string, oldTargets: string[], pdfPath: string): string {
+	const offset = bodyOffset(content);
+	return content.slice(0, offset) + rewriteEmbeds(content.slice(offset), oldTargets, pdfPath);
 }

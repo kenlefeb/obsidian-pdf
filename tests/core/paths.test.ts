@@ -1,5 +1,5 @@
 import { expect, test } from "vitest";
-import { basename, dirname, extension, filename, isInFolder, isNote, isPdf, joinPath, samePair } from "../../src/core/paths.ts";
+import { basename, dirname, extension, filename, isInFolder, isNote, findPathIgnoringCase, isPdf, joinPath, samePair } from "../../src/core/paths.ts";
 
 test("root-level files", () => {
 	expect(dirname("Statement.pdf")).toBe("");
@@ -36,4 +36,11 @@ test("isInFolder", () => {
 	expect(isInFolder("att", "att")).toBe(true);
 	expect(isInFolder("attic/x.pdf", "att")).toBe(false);
 	expect(isInFolder("x.pdf", "att")).toBe(false);
+});
+
+test("findPathIgnoringCase", () => {
+	expect(findPathIgnoringCase(["a/s.md", "a/T.pdf"], "a/S.md")).toBe("a/s.md");
+	expect(findPathIgnoringCase(["a/S.md"], "a/S.md")).toBe("a/S.md");
+	expect(findPathIgnoringCase(["a/S.pdf", "b/S.md"], "a/S.md")).toBeNull();
+	expect(findPathIgnoringCase([], "a/S.md")).toBeNull();
 });
