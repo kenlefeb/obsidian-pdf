@@ -23,14 +23,17 @@ export class Executor {
 	 * Runs the actions one after another. Resolves true when every action ran, false when it stopped
 	 * quietly because a file an action needs is no longer there (the vault changed under us; recheck).
 	 * On a failure it stops, shows a Notice naming the file and the reason, and rethrows.
+	 * With `quiet` a `wrap` action shows no Notice of its own: its failure, and a WrapIncomplete (the PDF
+	 * is wrapped but a later step failed), are thrown for the caller to report.
 	 */
-	async run(actions: Action[]): Promise<boolean> {
+	async run(actions: Action[], options: { quiet?: boolean } = {}): Promise<boolean> {
+		const quiet = options.quiet === true;
 		for (const action of actions) {
 			let outcome: Outcome;
 			try {
-				outcome = await this.runOne(action);
+				outcome = await this.runOne(action, quiet);
 			} catch (error) {
-				new Notice(this.failureMessage(action, error));
+				if (!quiet) new Notice(this.failureMessage(action, error));
 				throw error;
 			}
 			if (outcome === "stale") return false;
@@ -38,7 +41,7 @@ export class Executor {
 		return true;
 	}
 
-	private async runOne(action: Action): Promise<Outcome> {
+	private async runOne(action: Action, quiet: boolean): Promise<Outcome> {
 		switch (action.type) {
 			case "rename":
 				return this.rename(action.from, action.to);
@@ -51,7 +54,7 @@ export class Executor {
 			case "delete":
 				return this.delete(action.path);
 			case "wrap":
-				return this.wrap(action.pdfPath);
+				return this.wrap(action.pdfPath, quiet);
 			case "notice":
 				new Notice(action.message);
 				return "done";
@@ -108,7 +111,7 @@ export class Executor {
 		return "done";
 	}
 
-	private async wrap(pdfPath: string): Promise<Outcome> {
+	private async wrap(pdfPath: string, quiet: boolean): Promise<Outcome> {
 		const pdf = this.app.vault.getFileByPath(pdfPath);
 		if (!pdf) return "stale";
 		// Released once the wrap settles either way: if Templater created the note elsewhere and it was moved
@@ -118,7 +121,7 @@ export class Executor {
 			await wrapPdf(this.app, this.getSettings(), this.saveSettings, pdf, { open: false });
 		} catch (error) {
 			// The PDF is wrapped; only a later step failed. Say so and carry on.
-			if (!(error instanceof WrapIncomplete)) throw error;
+			if (quiet || !(error instanceof WrapIncomplete)) throw error;
 			new Notice(error.message);
 		} finally {
 			release();

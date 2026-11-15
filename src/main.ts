@@ -7,7 +7,8 @@ import { LocalIntent } from "./obsidian/local-intent.ts";
 import { OwnChanges } from "./core/marks.ts";
 import { Executor } from "./obsidian/execute.ts";
 import { Watcher } from "./obsidian/watcher.ts";
-import { AttentionStore, scanAtStartup } from "./obsidian/attention-store.ts";
+import { AttentionStore, attachmentFolder, scanAtStartup } from "./obsidian/attention-store.ts";
+import { AutoWrapper, isAutoWrapOn } from "./obsidian/auto-wrap.ts";
 import { AttentionModal } from "./ui/attention-modal.ts";
 import { attentionNotice } from "./core/attention.ts";
 import { registerSpike } from "./spike/spike.ts";
@@ -24,13 +25,24 @@ export default class PdfWrapperPlugin extends Plugin {
 		registerSpike(this, localIntent, own);
 
 		const executor = new Executor(this.app, () => this.settings, () => this.saveSettings(), own);
-		const store = new AttentionStore(this, executor, () => false); // Automatic wrapping arrives in a later task.
+		const store = new AttentionStore(this, executor, () => isAutoWrapOn(this.app));
+		const autoWrapper = new AutoWrapper(
+			this.app,
+			executor,
+			() => this.settings,
+			() => attachmentFolder(this.app),
+			() => void store.refresh(),
+		);
+		this.register(() => autoWrapper.unload());
 		const watcher = new Watcher(this, {
 			localIntent,
 			own,
 			executor,
 			getSettings: () => this.settings,
 			onRecheck: (paths) => void store.refresh(paths),
+			onPdfCreated: (path) => {
+				if (isAutoWrapOn(this.app)) autoWrapper.onPdfCreated(path);
+			},
 		});
 		watcher.start();
 
@@ -81,7 +93,7 @@ export default class PdfWrapperPlugin extends Plugin {
 			})
 		);
 
-		this.addSettingTab(new PdfWrapperSettingTab(this.app, this));
+		this.addSettingTab(new PdfWrapperSettingTab(this.app, this, () => void store.refresh()));
 	}
 
 	private async handleWrapPdf(pdfFile: TFile) {

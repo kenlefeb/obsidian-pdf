@@ -1,13 +1,14 @@
 import { AbstractInputSuggest, App, PluginSettingTab, Setting, TFile } from "obsidian";
 import { DEFAULT_SETTINGS } from "./core/settings-data.ts";
 import type PdfWrapperPlugin from "./main.ts";
+import { isAutoWrapOn, setAutoWrap } from "./obsidian/auto-wrap.ts";
 
 export type { PdfWrapperSettings } from "./core/settings-data.ts";
 
 export class PdfWrapperSettingTab extends PluginSettingTab {
 	plugin: PdfWrapperPlugin;
 
-	constructor(app: App, plugin: PdfWrapperPlugin) {
+	constructor(app: App, plugin: PdfWrapperPlugin, private readonly onAutoWrapChanged: () => void) {
 		super(app, plugin);
 		this.plugin = plugin;
 	}
@@ -39,6 +40,19 @@ export class PdfWrapperSettingTab extends PluginSettingTab {
 				.onChange(async (value) => {
 					this.plugin.settings.markerProperty = value.trim() || DEFAULT_SETTINGS.markerProperty;
 					await this.plugin.saveSettings();
+				}));
+
+		new Setting(containerEl)
+			// eslint-disable-next-line obsidianmd/ui/sentence-case -- "PDFs" is an acronym plural; the text is the spec's wording.
+			.setName('Wrap new PDFs automatically')
+			// eslint-disable-next-line obsidianmd/ui/sentence-case -- as above.
+			.setDesc('Applies to this device only. PDFs that arrive while Obsidian is closed are listed for you to wrap.')
+			.addToggle(toggle => toggle
+				.setValue(isAutoWrapOn(this.app))
+				.onChange((value) => {
+					setAutoWrap(this.app, value);
+					// Unwrapped entries appear or disappear with the switch.
+					this.onAutoWrapChanged();
 				}));
 
 		new Setting(containerEl)

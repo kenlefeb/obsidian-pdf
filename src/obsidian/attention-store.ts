@@ -14,7 +14,7 @@ interface VaultWithConfig {
 	getConfig?: (key: string) => unknown;
 }
 
-function attachmentFolder(app: App): string | null {
+export function attachmentFolder(app: App): string | null {
 	try {
 		return specificAttachmentFolder((app.vault as unknown as VaultWithConfig).getConfig?.("attachmentFolderPath"));
 	} catch (error) {

@@ -117,3 +117,21 @@ opens the list as last checked.
 - [ ] Delete a wrapped note in Finder with Obsidian open, wait for its "note removed" entry, then copy the note back in Finder: on the next check the entry clears. Clicking "Delete the PDF" (and confirming) before it clears is refused with "A note named <note> now exists beside this PDF. Check the list again." and the PDF stays.
 - [ ] Run "Show documents needing attention" straight after launch, before the startup check has run: the list says "Checking…" and then fills in.
 - [ ] A Missing entry with no candidates shows "No candidate PDFs found" as a line in the row (as well as on the disabled button's tooltip on desktop).
+
+## Automatic wrapping
+
+The switch is Settings → PDF Wrapper → "Wrap new PDFs automatically". It is stored on the device, not synced.
+None of this has been run in Obsidian yet.
+
+- [ ] Toggle on; drop a PDF into the file explorer: it is wrapped within a few seconds (after about two), a notice "Wrapped <name>" appears and the new note is not opened.
+- [ ] Save a PDF into the vault folder from Finder while Obsidian is running: it is wrapped.
+- [ ] Paste a PDF into another note with a specific "Default location for new attachments" folder set: the PDF lands in that folder and is not wrapped.
+- [ ] Drop 20 PDFs at once (a folder dragged in): each gets exactly one note, no PDF is skipped, and no note is created twice. Note how long the last one took.
+- [ ] With the template path empty or pointing at a missing file, drop several PDFs: they are still wrapped (the template is created), with no failure notice.
+- [ ] Make wrapping fail for every PDF (for example a read-only folder), then drop 5 PDFs: the failure appears once, not five times, and not twice for one PDF.
+- [ ] Toggle off during the settle period (within two seconds of dropping a PDF): the PDF is not wrapped.
+- [ ] Disable the plugin within two seconds of dropping a PDF: nothing is wrapped afterwards.
+- [ ] With two devices both on, add a PDF on one: exactly one note results, on both devices. Record how long the second device waited before it saw the note (and whether it ever wrapped the PDF itself).
+- [ ] The toggle state differs per device: turn it on here, check another device still has it off.
+- [ ] A PDF added while Obsidian was closed appears as "Unwrapped" in the list with "Wrap all", and is not wrapped on its own at startup.
+- [ ] Toggle off: no "Unwrapped" entries are listed, and the list refreshes straight away when the switch is flipped.
