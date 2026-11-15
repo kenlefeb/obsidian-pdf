@@ -65,3 +65,21 @@ test('a markdown link whose text holds brackets', () => {
 	expect(links('[see [1]](A.pdf)')).toBe(true);
 	expect(links('[see [1] and [2]](folder/A.pdf)')).toBe(true);
 });
+test('a 200 KB line of unclosed markdown links is read quickly, and a real link after it is still found', () => {
+	const junk = '[x]('.repeat(50_000);
+	const started = Date.now();
+	expect(links(`${junk}\nSee [the statement](folder/A.pdf).`)).toBe(true);
+	expect(links(junk)).toBe(false);
+	expect(Date.now() - started).toBeLessThan(1000);
+});
+test('a 200 KB line of unclosed wikilinks is read quickly, and a real link after it is still found', () => {
+	const junk = '[[x'.repeat(70_000);
+	const started = Date.now();
+	expect(links(`${junk}\n![[A.pdf]]`)).toBe(true);
+	expect(links(junk)).toBe(false);
+	expect(Date.now() - started).toBeLessThan(1000);
+});
+test('a markdown link target longer than 2048 characters is not a link', () => {
+	expect(links(`[x](${'d/'.repeat(1100)}A.pdf)`)).toBe(false);
+	expect(links(`[x](${'d/'.repeat(1000)}A.pdf)`)).toBe(true);
+});

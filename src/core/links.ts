@@ -1,6 +1,7 @@
 import { basename, filename } from "./paths.ts";
 
-const WIKILINK = /\[\[([^\]\n]*)\]\]/g;
+/** A markdown link target longer than this is not taken as a link. */
+const MAX_TARGET = 2048;
 
 /**
  * True when `text` (a note's whole text, frontmatter included) links to or embeds the PDF at `pdfPath`: a wikilink or
@@ -18,7 +19,7 @@ export function textLinksToPdf(text: string, pdfPath: string): boolean {
 		const own = filename(t);
 		return t === path || own === name || own === base;
 	};
-	for (const [, inner = ""] of text.matchAll(WIKILINK)) {
+	for (const inner of wikilinkInners(text)) {
 		if (matches(wikilinkTarget(inner))) return true;
 	}
 	for (const inner of markdownLinkTargets(text)) {
@@ -34,43 +35,75 @@ function wikilinkTarget(inner: string): string {
 }
 
 /**
+ * What is between `[[` and `]]` for each wikilink or embed in `text`: no `]` and no line break inside. Linear in the
+ * length of the text: where the next `]` or line break is, is known for every position after one backward pass.
+ */
+function wikilinkInners(text: string): string[] {
+	const n = text.length;
+	const nextStop = new Int32Array(n + 1);
+	nextStop[n] = n;
+	for (let k = n - 1; k >= 0; k--) nextStop[k] = text[k] === "]" || text[k] === "\n" ? k : (nextStop[k + 1] ?? n);
+	const inners: string[] = [];
+	let i = 0;
+	while (i < n - 1) {
+		if (text[i] === "[" && text[i + 1] === "[") {
+			const j = nextStop[i + 2] ?? n;
+			if (text[j] === "]" && text[j + 1] === "]") {
+				inners.push(text.slice(i + 2, j));
+				i = j + 2;
+				continue;
+			}
+		}
+		i++;
+	}
+	return inners;
+}
+
+/**
  * The raw targets of the markdown links and embeds in `text`: what follows each `](` that has a `[` before it on the
- * same line (so link text may hold brackets), up to the matching `)` (parentheses inside the target may nest), or up
- * to `>` for the `<…>` form. A target is not followed past the end of its line.
+ * same line (so link text may hold brackets), up to the `)` that closes the `(` (parentheses inside the target may
+ * nest), or, for the `<…>` form, up to and including the `>`. A target is not followed past the end of its line, and
+ * one longer than MAX_TARGET is not taken. Linear in the length of the text: each line's parentheses are matched once.
  */
 function markdownLinkTargets(text: string): string[] {
 	const targets: string[] = [];
-	let at = text.indexOf("](");
-	while (at >= 0) {
-		const lineStart = text.lastIndexOf("\n", at) + 1;
-		const start = at + 2;
-		if (text.slice(lineStart, at).includes("[")) {
-			const end = targetEnd(text, start);
-			if (end !== null) targets.push(text.slice(start, end));
-		}
-		at = text.indexOf("](", start);
+	let lineStart = 0;
+	while (lineStart <= text.length) {
+		const newline = text.indexOf("\n", lineStart);
+		const lineEnd = newline < 0 ? text.length : newline;
+		if (text.slice(lineStart, lineEnd).includes("](")) collectLineTargets(text, lineStart, lineEnd, targets);
+		lineStart = lineEnd + 1;
 	}
 	return targets;
 }
 
-/** Where the target starting at `start` ends (the offset of its closing `)`), or null when it is not closed on its line. */
-function targetEnd(text: string, start: number): number | null {
-	let depth = 0;
-	let angle = text[start] === "<";
-	for (let i = angle ? start + 1 : start; i < text.length; i++) {
-		const ch = text[i];
-		if (ch === "\n") return null;
-		if (angle) {
-			if (ch === ">") angle = false;
-			continue;
-		}
-		if (ch === "(") depth++;
+function collectLineTargets(text: string, from: number, to: number, targets: string[]): void {
+	const size = to - from;
+	// For each "(" (by offset in the line), the offset of the ")" that closes it, or -1.
+	const closeOf = new Int32Array(size).fill(-1);
+	// For each offset, the offset of the next ">" at or after it in the line, or -1.
+	const nextGt = new Int32Array(size + 1).fill(-1);
+	const open: number[] = [];
+	for (let k = 0; k < size; k++) {
+		const ch = text[from + k];
+		if (ch === "(") open.push(k);
 		else if (ch === ")") {
-			if (depth === 0) return i;
-			depth--;
+			const o = open.pop();
+			if (o !== undefined) closeOf[o] = k;
 		}
 	}
-	return null;
+	for (let k = size - 1; k >= 0; k--) nextGt[k] = text[from + k] === ">" ? k : (nextGt[k + 1] ?? -1);
+	let bracketSeen = false;
+	for (let k = 0; k < size - 1; k++) {
+		const ch = text[from + k];
+		if (ch === "[") {
+			bracketSeen = true;
+		} else if (ch === "]" && text[from + k + 1] === "(" && bracketSeen) {
+			const start = k + 2;
+			const end = text[from + start] === "<" ? (nextGt[start + 1] ?? -1) + 1 : (closeOf[k + 1] ?? -1);
+			if (end > 0 && end - start <= MAX_TARGET) targets.push(text.slice(from + start, from + end));
+		}
+	}
 }
 
 /** `<folder/A B.pdf>`, `folder/A%20B.pdf#page=2 "title"` → `folder/A B.pdf`. */
