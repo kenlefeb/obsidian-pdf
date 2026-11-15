@@ -1,8 +1,8 @@
 import { App, normalizePath, Notice, TFile, TFolder, type TAbstractFile } from "obsidian";
 import { isLinkSafeName } from "./core/claims.ts";
-import { dirname, findPathIgnoringCase, isNote, joinPath } from "./core/paths.ts";
+import { dirname, findPathIgnoringCase, isNote, isPdf, joinPath } from "./core/paths.ts";
 import type { PdfWrapperSettings } from "./core/settings-data.ts";
-import { pathList, templaterOutcome } from "./core/templater-outcome.ts";
+import { isPlausibleTemplaterNote, pathList, templaterOutcome } from "./core/templater-outcome.ts";
 import {
 	defaultTemplate,
 	defaultTemplatePath,
@@ -40,9 +40,9 @@ export class WrapIncomplete extends WrapMessage {
 }
 
 /**
- * Templater ran without an error but returned no note, none is at the expected path, and the new notes in the vault do
- * not show which one it created: the template renamed or moved its own note. Shown as it is (after "Failed to wrap"),
- * not as "Could not create".
+ * Templater returned no note (or threw), none is at the expected path, and the new notes in the vault do not show
+ * which one it created, if any: the template may have renamed or moved its own note. Shown as it is (after "Failed to
+ * wrap"), not as "Could not create". It only names the new notes; it never suggests deleting one.
  */
 class TemplaterNoteElsewhere extends Error {
 	constructor(pdfName: string, markerProperty: string, newNotes: string[]) {
@@ -67,6 +67,27 @@ const inFlight = new Set<string>();
  * Templater call, in which case a new note in the vault may be that wrap's and not this one's.
  */
 let wrapsStarted = 0;
+
+const wrapSucceededListeners = new Set<() => void>();
+
+/**
+ * Calls `listener` after every wrap that created and marked a note (including one whose later step failed). Returns
+ * the function that removes it.
+ */
+export function onWrapSucceeded(listener: () => void): () => void {
+	wrapSucceededListeners.add(listener);
+	return () => wrapSucceededListeners.delete(listener);
+}
+
+function notifyWrapSucceeded(): void {
+	for (const listener of [...wrapSucceededListeners]) {
+		try {
+			listener();
+		} catch (e) {
+			console.error("PDF Wrapper: wrap listener failed", e);
+		}
+	}
+}
 
 /** Where the note wrapping `pdf` lives: beside it, with the same base name. */
 export function siblingNotePath(pdf: TFile): string {
@@ -103,7 +124,12 @@ export async function wrapPdf(
 	inFlight.add(key);
 	wrapsStarted++;
 	try {
-		return await wrapOnce(app, settings, saveSettings, pdfFile, options);
+		const note = await wrapOnce(app, settings, saveSettings, pdfFile, options);
+		notifyWrapSucceeded();
+		return note;
+	} catch (e) {
+		if (e instanceof WrapIncomplete) notifyWrapSucceeded();
+		throw e;
 	} finally {
 		inFlight.delete(key);
 	}
@@ -134,9 +160,9 @@ async function wrapOnce(
 		throw new WrapRefusal(`Cannot wrap ${pdfFile.name}: its note would be the template file ${templateFile.path}.`);
 	}
 
-	let note: TFile;
+	let created: CreatedNote;
 	try {
-		note = await createNoteFromTemplate(app, templateFile, folder, pdfFile, settings.markerProperty);
+		created = await createNoteFromTemplate(app, templateFile, folder, pdfFile, settings.markerProperty);
 	} catch (e) {
 		// Messages about what Templater did, shown as they are; nothing was left at the note path by this wrap.
 		if (e instanceof TemplaterNoteElsewhere || e instanceof WrapRefusal) throw e;
@@ -146,8 +172,26 @@ async function wrapOnce(
 		throw new Error(`Could not create ${notePath}: ${reason(e)}.`);
 	}
 
+	const note = created.file;
+	const recoveredFrom = created.recoveredFrom;
+	if (recoveredFrom !== null) {
+		// A note Templater made elsewhere and did not return, recognised as its own: move it back beside the PDF.
+		try {
+			await app.fileManager.renameFile(note, notePath);
+		} catch (e) {
+			if (note.path === recoveredFrom) {
+				throw new Error(
+					`Templater created a note at ${recoveredFrom}, but it could not be moved beside ${pdfFile.name}: ${reason(e)}. ` +
+					`The note is still at ${recoveredFrom} and was not changed.`,
+				);
+			}
+			throw notMarkedRecovered(recoveredFrom, note.path, pdfFile, settings.markerProperty, e);
+		}
+		new Notice(`Moved ${recoveredFrom} beside ${pdfFile.name}.`);
+	}
+
 	try {
-		if (note.path !== notePath) {
+		if (recoveredFrom === null && note.path !== notePath) {
 			// A template that renames or moves the note it creates: put it back beside the PDF.
 			await app.fileManager.renameFile(note, notePath);
 		}
@@ -156,6 +200,7 @@ async function wrapOnce(
 		if (e instanceof EmbedUpdateError) {
 			throw new WrapIncomplete(`Created and marked ${note.path}, but could not update its PDF embed: ${reason(e)}.`, note);
 		}
+		if (recoveredFrom !== null) throw notMarkedRecovered(recoveredFrom, note.path, pdfFile, settings.markerProperty, e);
 		throw notMarked(note.path, pdfFile, settings.markerProperty, e);
 	}
 
@@ -167,6 +212,17 @@ async function wrapOnce(
 		}
 	}
 	return note;
+}
+
+/**
+ * A note recovered from elsewhere was moved but could not be marked. The message does not suggest deleting it: it
+ * was recognised as Templater's only from its text.
+ */
+function notMarkedRecovered(from: string, notePath: string, pdfFile: TFile, markerProperty: string, e: unknown): Error {
+	return new Error(
+		`Moved ${from} beside ${pdfFile.name} as ${notePath}, but could not mark it as wrapping ${pdfFile.name}: ${reason(e)}. ` +
+		`Add the "${markerProperty}" property to it by hand.`,
+	);
 }
 
 /** The note exists but carries no claim. It is not deleted: the message tells the user what to do. */
@@ -331,15 +387,22 @@ function getTemplaterPlugin(app: App): TemplaterPlugin | null {
 	return null;
 }
 
+/** The note a wrap created, and the path it was found at when it was recovered from elsewhere (else null). */
+interface CreatedNote {
+	file: TFile;
+	recoveredFrom: string | null;
+}
+
 async function createNoteFromTemplate(
 	app: App,
 	templateFile: TFile,
 	folder: TFolder,
 	pdfFile: TFile,
 	markerProperty: string,
-): Promise<TFile> {
+): Promise<CreatedNote> {
 	const filename = pdfFile.basename;
 	const notePath = normalizePath(folder.isRoot() ? `${filename}.md` : `${folder.path}/${filename}.md`);
+	const plain = (file: TFile): CreatedNote => ({ file, recoveredFrom: null });
 
 	// Try Templater plugin first — it handles its own placeholder resolution
 	const templater = getTemplaterPlugin(app);
@@ -347,9 +410,12 @@ async function createNoteFromTemplate(
 		let created: TFile | undefined;
 		let ran = false;
 		// What exists before the call, so that afterwards a note Templater created elsewhere can be told apart from none.
-		const before = app.vault.getMarkdownFiles().map((file) => file.path);
-		const startedBefore = wrapsStarted;
-		const aloneAtStart = inFlight.size <= 1;
+		const call: TemplaterCall = {
+			before: app.vault.getMarkdownFiles(),
+			startedAt: Date.now(),
+			startedBefore: wrapsStarted,
+			aloneAtStart: inFlight.size <= 1,
+		};
 		try {
 			created = await templater.templater.create_new_note_from_template(templateFile, folder, filename, false);
 			ran = true;
@@ -358,37 +424,31 @@ async function createNoteFromTemplate(
 			const left = app.vault.getAbstractFileByPath(notePath);
 			if (left instanceof TFile) {
 				console.warn("PDF Wrapper: Templater failed after creating the note; using the note it created", e);
-				return left;
+				return plain(left);
 			}
-			console.warn("PDF Wrapper: Templater failed, falling back to manual creation", e);
+			console.warn("PDF Wrapper: Templater failed", e);
+			// It may have moved its note away before failing: recover that note rather than create a second one.
+			// Throws when there are new notes but none is recognisably Templater's.
+			const elsewhere = await findTemplaterNote(app, call, templateFile, pdfFile, markerProperty);
+			if (elsewhere !== null) {
+				console.warn("PDF Wrapper: Templater failed after creating the note elsewhere; using that note", elsewhere.path);
+				return { file: elsewhere, recoveredFrom: elsewhere.path };
+			}
+			console.warn("PDF Wrapper: falling back to manual creation");
 		}
 		if (ran) {
-			if (created instanceof TFile) return created;
+			if (created instanceof TFile) return plain(created);
 			// Templater may not return the file; look it up
 			const found = app.vault.getAbstractFileByPath(notePath);
-			if (found instanceof TFile) return found;
-			// Decide from the notes that exist now, not from an assumption about what Templater does on an error.
-			// A new note is identified safely only when no other wrap ran meanwhile (its note would be new too).
-			const after = app.vault.getMarkdownFiles().map((file) => file.path);
-			const safe = aloneAtStart && inFlight.size <= 1 && wrapsStarted === startedBefore;
-			const outcome = templaterOutcome(before, after, safe);
-			if (outcome.kind === "none") {
-				// Templater made no note, or removed the one it made (its template failed or a prompt was cancelled).
-				throw new WrapRefusal(
-					`Templater did not create a note for ${pdfFile.name}. Check its own message, fix the template or answer ` +
-					`its prompt, then wrap again.`,
-					"template-failed",
-				);
-			}
-			if (outcome.kind === "moved") {
-				// The template renamed or moved its note: the caller moves it back beside the PDF and marks it.
-				const moved = app.vault.getAbstractFileByPath(outcome.path);
-				if (moved instanceof TFile && moved.path !== templateFile.path) return moved;
-				throw new TemplaterNoteElsewhere(pdfFile.name, markerProperty, [outcome.path]);
-			}
-			// Several new notes, or one we cannot attribute: creating another here would leave a second note nobody is
-			// told about, so name them instead.
-			throw new TemplaterNoteElsewhere(pdfFile.name, markerProperty, outcome.paths);
+			if (found instanceof TFile) return plain(found);
+			const elsewhere = await findTemplaterNote(app, call, templateFile, pdfFile, markerProperty);
+			if (elsewhere !== null) return { file: elsewhere, recoveredFrom: elsewhere.path };
+			// Templater made no note, or removed the one it made (its template failed or a prompt was cancelled).
+			throw new WrapRefusal(
+				`Templater did not create a note for ${pdfFile.name}. Check its own message, fix the template or answer ` +
+				`its prompt, then wrap again.`,
+				"template-failed",
+			);
 		}
 	}
 
@@ -396,7 +456,47 @@ async function createNoteFromTemplate(
 	// resolve core Templates placeholders
 	const raw = await app.vault.read(templateFile);
 	const content = resolveCoreTemplatePlaceholders(app, raw, filename);
-	return await app.vault.create(notePath, content);
+	return plain(await app.vault.create(notePath, content));
+}
+
+/** The state of the vault and of other wraps when a Templater call started. */
+interface TemplaterCall {
+	before: TFile[];
+	startedAt: number;
+	startedBefore: number;
+	aloneAtStart: boolean;
+}
+
+/**
+ * After a Templater call that left no note at the expected path: the note Templater created elsewhere, when it can be
+ * told apart safely, or null when no new note exists. Decides from the files that exist now, not from an assumption
+ * about what Templater does. A note is taken only when it is the one new file (by identity, so a renamed note does not
+ * count), was created during the call, no other wrap ran meanwhile, and its text has the marker property without
+ * naming another existing PDF. Otherwise, when new notes exist, throws a TemplaterNoteElsewhere naming them.
+ */
+async function findTemplaterNote(
+	app: App,
+	call: TemplaterCall,
+	templateFile: TFile,
+	pdfFile: TFile,
+	markerProperty: string,
+): Promise<TFile | null> {
+	const after = app.vault.getMarkdownFiles();
+	const safe = call.aloneAtStart && inFlight.size <= 1 && wrapsStarted === call.startedBefore;
+	const outcome = templaterOutcome(call.before, after, call.startedAt, safe);
+	if (outcome.kind === "none") return null;
+	if (outcome.kind === "unclear") throw new TemplaterNoteElsewhere(pdfFile.name, markerProperty, outcome.paths);
+	const candidate = app.vault.getFileByPath(outcome.path);
+	if (candidate !== null && candidate.path !== templateFile.path) {
+		try {
+			const text = await app.vault.cachedRead(candidate);
+			const pdfs = app.vault.getFiles().filter((file) => isPdf(file.path)).map((file) => file.path);
+			if (isPlausibleTemplaterNote(text, markerProperty, pdfFile.path, pdfs)) return candidate;
+		} catch (e) {
+			console.warn("PDF Wrapper: could not read the note Templater may have created", outcome.path, e);
+		}
+	}
+	throw new TemplaterNoteElsewhere(pdfFile.name, markerProperty, [outcome.path]);
 }
 
 type MomentFn = () => { format: (fmt: string) => string };
