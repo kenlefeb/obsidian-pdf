@@ -7,6 +7,9 @@ import { LocalIntent } from "./obsidian/local-intent.ts";
 import { OwnChanges } from "./core/marks.ts";
 import { Executor } from "./obsidian/execute.ts";
 import { Watcher } from "./obsidian/watcher.ts";
+import { AttentionStore, scanAtStartup } from "./obsidian/attention-store.ts";
+import { AttentionModal } from "./ui/attention-modal.ts";
+import { attentionNotice } from "./core/attention.ts";
 import { registerSpike } from "./spike/spike.ts";
 
 export default class PdfWrapperPlugin extends Plugin {
@@ -21,14 +24,38 @@ export default class PdfWrapperPlugin extends Plugin {
 		registerSpike(this, localIntent, own);
 
 		const executor = new Executor(this.app, () => this.settings, () => this.saveSettings(), own);
+		const store = new AttentionStore(this, executor, () => false); // Automatic wrapping arrives in a later task.
 		const watcher = new Watcher(this, {
 			localIntent,
 			own,
 			executor,
 			getSettings: () => this.settings,
-			onRecheck: () => {}, // A later task supplies the scan: (pendingRemoved: string[]) => void.
+			onRecheck: (paths) => void store.refresh(paths),
 		});
 		watcher.start();
+
+		const showAttention = () => new AttentionModal(this.app, store).open();
+		this.addCommand({
+			id: 'show-needs-attention',
+			name: 'Show documents needing attention',
+			callback: showAttention,
+		});
+		this.addCommand({
+			id: 'scan-pairs',
+			name: 'Check wrapped documents',
+			callback: () => {
+				void store.refresh().then(showAttention);
+			},
+		});
+		this.app.workspace.onLayoutReady(() => {
+			scanAtStartup(this, store, (count) => {
+				const notice = new Notice(attentionNotice(count));
+				notice.messageEl.addEventListener('click', () => {
+					notice.hide();
+					showAttention();
+				});
+			});
+		});
 
 		this.addCommand({
 			id: 'wrap-active-pdf',

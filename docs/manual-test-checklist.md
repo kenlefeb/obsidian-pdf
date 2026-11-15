@@ -92,3 +92,21 @@ report any that does not hold.
 - [ ] Deleting a folder: by the time the plugin handles the note's deletion, the PDF is already gone from Obsidian's file list (no "Could not delete" notice).
 - [ ] The plugin's own rename of a partner fires `vault` `rename` within 5 seconds, so it is recognised as the plugin's own and not followed back.
 - [ ] Obsidian Sync and iCloud apply remote renames and deletes without going through `Vault.rename`, `Vault.trash` or `Vault.delete` (otherwise a receiving device would act on them; the two settings above are the remedy).
+
+## Needs attention
+
+The startup check runs about two seconds after the vault loads, and again two seconds later before its notice
+appears. "Check wrapped documents" runs it on demand and opens the list; "Show documents needing attention"
+opens the list as last checked.
+
+- [ ] With Obsidian closed, rename a wrapped note in Finder (or Explorer). On launch a notice "1 wrapped document needs attention" appears; clicking it opens the list, where the note is listed with "PDF has a different name: <old name>.pdf". Nothing changed on disk before you click a fix. "Rename PDF to match" fixes it and the entry disappears.
+- [ ] With Obsidian closed, move a wrapped note to another folder in Finder: listed with "PDF is in another folder: <folder>"; "Move PDF beside note" fixes it.
+- [ ] "Make a copy" of a wrapped note in Finder: the copy is listed with "Points at another document's PDF", the original is not listed and is unchanged; "Copy the PDF" gives the copy its own PDF and the entry disappears.
+- [ ] Delete a wrapped note in Finder with Obsidian open: within a few seconds the PDF is listed with "Its note was removed outside Obsidian". Restart Obsidian: the entry is still there. On three such entries, check each fix: "Keep as a plain PDF" removes the entry and changes no file; "Wrap" wraps it again; "Delete the PDF" first asks for confirmation naming the PDF, then deletes it as the "Deleted files" setting says.
+- [ ] Delete a wrapped note in Finder, then delete its PDF in Finder too: the "note removed" entry disappears by itself (run "Check wrapped documents" if the list is not open).
+- [ ] A note whose PDF is missing (delete the PDF in Finder): listed with "PDF not found. It may not have downloaded yet."; "Choose a PDF" lists candidate PDFs (unclaimed ones beside the note first) and pairing with one works; with no candidates the button is disabled with the tooltip "No candidate PDFs found".
+- [ ] Leave the list open, change a listed document in Finder so its entry no longer applies (for example rename the note back), then click its fix: a notice says "This has changed since it was listed. Check the list again." and the list refreshes. Nothing else changes.
+- [ ] With several misnamed or displaced entries, one of which cannot be fixed (for example make its destination folder read-only, or lock the PDF in another app on Windows): "Fix all" fixes the others up to that one, shows the failure notice, then "Stopped after fixing <n> documents." and lists what is left.
+- [ ] "Fix all" with nothing blocking: "Fixed <n> documents." and every misnamed or displaced entry with a single claimant is gone. Neither "Fix all" nor "Wrap all" appears when it would do nothing.
+- [ ] With nothing broken, the list says "Everything is in order." and no startup notice appears.
+- [ ] On a phone: the list opens from the command palette, long names wrap instead of overflowing, every button is easy to tap (at least 44px tall), and each fix works.

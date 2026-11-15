@@ -1,0 +1,48 @@
+/* Needs attention list */
+.pdf-wrapper-attention-header {
+	display: flex;
+	flex-wrap: wrap;
+	gap: var(--size-4-2);
+	margin-bottom: var(--size-4-3);
+}
+
+.pdf-wrapper-attention-row {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	justify-content: space-between;
+	gap: var(--size-4-2) var(--size-4-4);
+	padding: var(--size-4-3) 0;
+	border-top: 1px solid var(--background-modifier-border);
+}
+
+.pdf-wrapper-attention-info {
+	flex: 1 1 14em;
+	min-width: 0;
+	overflow-wrap: anywhere;
+}
+
+.pdf-wrapper-attention-name {
+	font-weight: var(--font-semibold);
+}
+
+.pdf-wrapper-attention-folder,
+.pdf-wrapper-attention-state {
+	color: var(--text-muted);
+	font-size: var(--font-ui-small);
+}
+
+.pdf-wrapper-attention-fixes,
+.pdf-wrapper-confirm-buttons {
+	display: flex;
+	flex-wrap: wrap;
+	gap: var(--size-4-2);
+}
+
+.pdf-wrapper-confirm-buttons {
+	justify-content: flex-end;
+}
+
+.pdf-wrapper-mobile button {
+	min-height: 44px;
+}
