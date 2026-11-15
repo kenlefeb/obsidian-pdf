@@ -4,6 +4,8 @@ import { PdfWrapperSettingTab } from "./settings.ts";
 import { existingSiblingNote, wrapPdf, WrapMessage } from "./pdf-wrapper.ts";
 import { isPdf } from "./core/paths.ts";
 import { LocalIntent } from "./obsidian/local-intent.ts";
+import { Executor, OwnChanges } from "./obsidian/execute.ts";
+import { Watcher } from "./obsidian/watcher.ts";
 import { registerSpike } from "./spike/spike.ts";
 
 export default class PdfWrapperPlugin extends Plugin {
@@ -14,7 +16,18 @@ export default class PdfWrapperPlugin extends Plugin {
 
 		const localIntent = new LocalIntent(this.app);
 		this.register(localIntent.install());
-		registerSpike(this, localIntent);
+		const own = new OwnChanges();
+		registerSpike(this, localIntent, own);
+
+		const executor = new Executor(this.app, () => this.settings, () => this.saveSettings(), own);
+		const watcher = new Watcher(this, {
+			localIntent,
+			own,
+			executor,
+			getSettings: () => this.settings,
+			onRecheck: () => {}, // A later task supplies the scan.
+		});
+		watcher.start();
 
 		this.addCommand({
 			id: 'wrap-active-pdf',

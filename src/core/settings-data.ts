@@ -2,6 +2,10 @@ export interface PdfWrapperSettings {
 	templatePath: string;
 	markerProperty: string;
 	hidePairedPdfs: boolean;
+	/** Trash a healthy pair's PDF when its note is deleted inside Obsidian on this device. */
+	followDeletes: boolean;
+	/** Rename or move the partner when a pair's note or PDF is renamed or moved inside Obsidian on this device. */
+	followRenames: boolean;
 	pendingRemovedPdfs: string[];
 }
 
@@ -9,6 +13,8 @@ export const DEFAULT_SETTINGS: PdfWrapperSettings = {
 	templatePath: "",
 	markerProperty: "wrapped-pdf",
 	hidePairedPdfs: true,
+	followDeletes: true,
+	followRenames: true,
 	pendingRemovedPdfs: [],
 };
 
@@ -29,6 +35,8 @@ export function mergeSettings(saved: unknown): PdfWrapperSettings {
 		templatePath: typeof data.templatePath === "string" ? data.templatePath : DEFAULT_SETTINGS.templatePath,
 		markerProperty: marker || DEFAULT_SETTINGS.markerProperty,
 		hidePairedPdfs: typeof data.hidePairedPdfs === "boolean" ? data.hidePairedPdfs : DEFAULT_SETTINGS.hidePairedPdfs,
+		followDeletes: typeof data.followDeletes === "boolean" ? data.followDeletes : DEFAULT_SETTINGS.followDeletes,
+		followRenames: typeof data.followRenames === "boolean" ? data.followRenames : DEFAULT_SETTINGS.followRenames,
 		pendingRemovedPdfs: Array.isArray(data.pendingRemovedPdfs)
 			? data.pendingRemovedPdfs.filter((p): p is string => typeof p === "string")
 			: [],

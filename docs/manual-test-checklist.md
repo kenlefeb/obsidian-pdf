@@ -41,3 +41,49 @@ Run each item twice: once with Templater enabled, once with Templater disabled (
 - [ ] A note whose frontmatter mentions `![[<name>.pdf]]` in another property keeps that value unchanged; only body embeds are rewritten.
 - [ ] If opening the new note fails (hard to force; skip if you cannot), the notice reads "Wrapped <pdf> as <note>, but could not open the note: …" with no "Failed to wrap" prefix, and the PDF counts as wrapped.
 - [ ] If the embed rewrite fails after the marker is written (hard to force; skip if you cannot), the notice reads "Created and marked <note>, but could not update its PDF embed: …" with no "Failed to wrap" prefix, and the note carries the marker.
+
+## Following in-app changes
+
+Do these with both "Delete the PDF when its note is deleted in Obsidian" and "Rename and move the PDF with its
+note" on (the defaults), on desktop and on a phone. Open the developer console (desktop) to see any
+"PDF Wrapper:" errors.
+
+- [ ] Rename a wrapped note in the file explorer: the PDF is renamed to match, the note's embed still shows the PDF, and the marker property reads `[[<new pdf path>|<new pdf name>]]`.
+- [ ] Move a wrapped note to another folder (drag in the explorer, and with "Move file to…"): the PDF moves beside it; embed and marker as above.
+- [ ] Drag a folder holding several pairs into another folder, and rename a folder holding pairs: both files of every pair end up together, every embed still renders, every marker points at the new path, and no notice appears.
+- [ ] Rename a PDF from its tab (the title in the view header): the note is renamed to match; embed and marker as above.
+- [ ] Move a PDF to another folder: the note follows.
+- [ ] Delete a wrapped note: the PDF is deleted the same way (check the system trash or the vault's `.trash` folder, per Settings → Files and links → Deleted files).
+- [ ] Delete a wrapped note whose PDF another note also claims: the PDF stays.
+- [ ] Delete a folder holding pairs: everything goes, and no "Could not delete" notice appears.
+- [ ] Delete only the PDF of a pair: the note stays.
+- [ ] Rename a note onto a name whose PDF already exists in that folder (for example rename `A.md` to `B.md` where `B.pdf` exists but `B.md` does not): a notice says the PDF could not be renamed because a file with that name already exists, `B.pdf` is unchanged, and `A.pdf` is still there.
+- [ ] Same, where the existing name differs only in letter case (`b.pdf` exists, rename `A.md` to `B.md`), on macOS or Windows: notice, nothing overwritten.
+- [ ] Case-only rename of a wrapped note (`report.md` to `Report.md`) on macOS or Windows: the PDF becomes `Report.pdf`, no notice, nothing lost.
+- [ ] Delete a wrapped note in Finder (or Explorer) with Obsidian open: the PDF stays.
+- [ ] Rename a wrapped note in Finder with Obsidian open: the PDF is not renamed.
+- [ ] Turn "Delete the PDF when its note is deleted in Obsidian" off, delete a wrapped note in Obsidian: the PDF stays.
+- [ ] Turn "Rename and move the PDF with its note" off, rename a wrapped note in Obsidian: the PDF is not renamed.
+- [ ] Rename a wrapped note, then rename it back by hand: the PDF follows both times.
+- [ ] Rename a wrapped note twice in quick succession (rename, then immediately rename again): the pair ends up matched under the second name, no notice.
+- [ ] With "Spike: toggle event log" on, rename a wrapped note: the PDF still follows (the spike log must not take the local-intent mark).
+- [ ] "Spike: rename a test pair" still renames the note and its PDF with a "Renamed the pair" notice and no "Could not" notice.
+- [ ] Wrap a PDF from the file menu: nothing else is renamed, moved or deleted, and no extra notice appears.
+
+### Assumptions about Obsidian the code relies on (unverified; confirm each)
+
+The plugin's event handling was built without a running Obsidian. Each line is a behaviour the code assumes;
+report any that does not hold.
+
+- [ ] A rename or move in the explorer fires `vault` `rename` with the new file and the old path, and goes through `Vault.rename` (so it is recognised as local). Check with the spike log: `local` is `true` for in-app renames, moves and deletes, and `false` for Finder changes.
+- [ ] When `vault` `rename` fires for a note, `metadataCache` already has that note's frontmatter under the new path (a followed rename works on the first try, not only after a recheck).
+- [ ] After renaming a PDF in Obsidian, the note's claim either still names the old path or already names the new one when the plugin looks; both are handled. Confirm the marker ends up canonical and is not rewritten a second time by Obsidian's link updater into a different form.
+- [ ] A folder rename or move fires one `rename` per file inside it, and by the time the plugin handles the first, Obsidian's file list already shows every file at its new path (otherwise the plugin may try to rename a partner that has already moved; it then stops quietly).
+- [ ] `fileManager.renameFile` onto an existing path throws rather than overwrites (the plugin checks first, so this only matters if the check races).
+- [ ] A case-only rename through `fileManager.renameFile` works on macOS and Windows, and `vault.getAbstractFileByPath` returns either nothing or the file itself for the new spelling.
+- [ ] `fileManager.trashFile` fires `vault` `delete` for the PDF (synchronously or not); the plugin then ignores it as its own change.
+- [ ] Deleting a note fires `metadataCache` `deleted` with the note's previous cache (including frontmatter), and `metadataCache.getFirstLinkpathDest(<claim>, <deleted note path>)` still resolves the claimed PDF at that moment.
+- [ ] `metadataCache` `deleted` fires for notes only (not for PDFs), so each deletion is handled once.
+- [ ] Deleting a folder: by the time the plugin handles the note's deletion, the PDF is already gone from Obsidian's file list (no "Could not delete" notice).
+- [ ] The plugin's own rename of a partner fires `vault` `rename` within 5 seconds, so it is recognised as the plugin's own and not followed back.
+- [ ] Obsidian Sync and iCloud apply remote renames and deletes without going through `Vault.rename`, `Vault.trash` or `Vault.delete` (otherwise a receiving device would act on them; the two settings above are the remedy).

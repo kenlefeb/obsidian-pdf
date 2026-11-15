@@ -49,6 +49,27 @@ export class PdfWrapperSettingTab extends PluginSettingTab {
 					this.plugin.settings.hidePairedPdfs = value;
 					await this.plugin.saveSettings();
 				}));
+
+		new Setting(containerEl)
+			.setName('Delete the PDF when its note is deleted in Obsidian')
+			// eslint-disable-next-line obsidianmd/ui/sentence-case -- "Finder" is the macOS app's name; the text is the spec's wording.
+			.setDesc('When on, deleting a wrapped note inside Obsidian on this device also deletes its PDF, the same way the note was deleted. This relies on the plugin telling your own deletions apart from ones made in Finder or delivered by sync. If a PDF is ever deleted when it should not be, turn this off: the PDF is then always kept and listed for you to decide.')
+			.addToggle(toggle => toggle
+				.setValue(this.plugin.settings.followDeletes)
+				.onChange(async (value) => {
+					this.plugin.settings.followDeletes = value;
+					await this.plugin.saveSettings();
+				}));
+
+		new Setting(containerEl)
+			.setName('Rename and move the PDF with its note')
+			.setDesc('When on, renaming or moving a wrapped note or its PDF inside Obsidian on this device does the same to its partner. This relies on the same detection. If you see duplicated or conflicting files after renames, turn this off: the pair is then listed for you to fix with one click.')
+			.addToggle(toggle => toggle
+				.setValue(this.plugin.settings.followRenames)
+				.onChange(async (value) => {
+					this.plugin.settings.followRenames = value;
+					await this.plugin.saveSettings();
+				}));
 	}
 }
 

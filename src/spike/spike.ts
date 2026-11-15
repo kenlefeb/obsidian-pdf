@@ -1,6 +1,7 @@
 // Throwaway spike code (plan task 5). Remove once the spike results are recorded.
 import { FuzzySuggestModal, Modal, Notice, Platform, Setting, TFile, TFolder, type App, type Plugin, type TAbstractFile } from "obsidian";
 import { buildExplorerCss } from "../core/explorer-css.ts";
+import type { OwnChanges } from "../obsidian/execute.ts";
 import type { LocalIntent } from "../obsidian/local-intent.ts";
 
 const LOG_PREFIX = "pdf-wrapper-spike-log-";
@@ -28,17 +29,18 @@ const LOG_HEADER = [
 	"#   pair-rename (written just before the 'rename a test pair' command renames a note and then its PDF; path = new note path, oldPath = old note path),",
 	"#   snapshot-start / snapshot-vault / snapshot-adapter / snapshot-end (the 'snapshot test files' command; vault = what Obsidian's file list holds,",
 	"#   adapter = what vault.adapter.list and adapter.stat report on disk, including hidden files if the adapter lists them).",
-	"# oldPath: rename only. local: LocalIntent.consume(path); for rename, consume(oldPath). Not called for modify or snapshot lines.",
-	"# A delete and a deleted for the same path within 5 s share one local value, because the first call uses up the mark.",
-	"# newPathLocal: rename only, LocalIntent.consume(new path).",
+	"# oldPath: rename only. local: LocalIntent.peek(path); for rename, peek(oldPath). Not called for modify or snapshot lines.",
+	"# peek answers like consume but leaves the mark for the plugin's own Watcher. Events the plugin itself causes are logged too.",
+	"# A delete and a deleted for the same path within 5 s share one local value.",
+	"# newPathLocal: rename only, LocalIntent.peek(new path).",
 	"# size: stat.size in bytes (0 = empty file); for create/rename/delete/modify only for PDF files; for snapshot lines every file.",
 	"# kind: file or folder (snapshot lines). mtime: modification time, ISO 8601 UTC (snapshot lines).",
 	"# '-' means not applicable or unknown.",
 	"",
 ].join("\n");
 
-export function registerSpike(plugin: Plugin, localIntent: LocalIntent): void {
-	const spike = new Spike(plugin, localIntent);
+export function registerSpike(plugin: Plugin, localIntent: LocalIntent, own: OwnChanges): void {
+	const spike = new Spike(plugin, localIntent, own);
 	plugin.addCommand({ id: "spike-toggle-event-log", name: "Spike: toggle event log", callback: () => spike.toggleLog() });
 	plugin.addCommand({ id: "spike-create-dummy-pairs", name: "Spike: create dummy pairs", callback: () => spike.promptDummyPairs() });
 	plugin.addCommand({ id: "spike-toggle-dummy-hiding", name: "Spike: toggle hiding of dummy PDF files", callback: () => spike.toggleHiding() });
@@ -63,7 +65,7 @@ class Spike {
 	private dummyGraceUntil = 0;
 	private sheet: CSSStyleSheet | null = null;
 
-	constructor(private readonly plugin: Plugin, private readonly localIntent: LocalIntent) {
+	constructor(private readonly plugin: Plugin, private readonly localIntent: LocalIntent, private readonly own: OwnChanges) {
 		this.app = plugin.app;
 		let id: unknown = this.app.loadLocalStorage(DEVICE_ID_KEY);
 		if (typeof id !== "string" || id === "") {
@@ -112,18 +114,18 @@ class Spike {
 		let local = "-";
 		let newPathLocal = "-";
 		if (event === "rename") {
-			local = String(this.localIntent.consume(oldPath));
-			newPathLocal = String(this.localIntent.consume(file.path));
+			local = String(this.localIntent.peek(oldPath));
+			newPathLocal = String(this.localIntent.peek(file.path));
 		} else if (event === "delete" || event === "deleted") {
 			local = String(this.deleteLocal(event, file.path));
 		} else if (event === "create") {
-			local = String(this.localIntent.consume(file.path));
+			local = String(this.localIntent.peek(file.path));
 		}
 		const size = isPdf(file) ? String(file.stat.size) : "-";
 		this.writeLine({ event, path: file.path, oldPath, local, newPathLocal, size });
 	}
 
-	/** The vault `delete` and the metadata cache `deleted` for one note share a single consume. */
+	/** The vault `delete` and the metadata cache `deleted` for one note share a single answer. */
 	private deleteLocal(event: string, path: string): boolean {
 		const now = Date.now();
 		const earlier = this.recentDeletes.get(path);
@@ -131,7 +133,7 @@ class Spike {
 			this.recentDeletes.delete(path);
 			return earlier.local;
 		}
-		const local = this.localIntent.consume(path);
+		const local = this.localIntent.peek(path);
 		this.recentDeletes.set(path, { event, local, at: now });
 		return local;
 	}
@@ -204,12 +206,23 @@ class Spike {
 		const newNotePath = `${prefix}${newBase}.md`;
 		this.writeLine({ event: "pair-rename", path: newNotePath, oldPath: note.path });
 		try {
-			await this.app.fileManager.renameFile(note, newNotePath);
-			await this.app.fileManager.renameFile(pdf, `${prefix}${newBase}.pdf`);
+			// Marked as the plugin's own changes so the Watcher does not follow them as well.
+			await this.renameOwn(note, newNotePath);
+			await this.renameOwn(pdf, `${prefix}${newBase}.pdf`);
 			new Notice(`Renamed the pair ${oldBase} to ${newBase}.`);
 		} catch (error) {
 			console.error("PDF Wrapper spike: could not rename the pair", error);
 			new Notice(`Could not rename the pair: ${error instanceof Error ? error.message : String(error)}`);
+		}
+	}
+
+	private async renameOwn(file: TFile, newPath: string): Promise<void> {
+		const release = this.own.mark(file.path);
+		try {
+			await this.app.fileManager.renameFile(file, newPath);
+		} catch (error) {
+			release();
+			throw error;
 		}
 	}
 

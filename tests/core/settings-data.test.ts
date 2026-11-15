@@ -2,16 +2,22 @@ import { expect, test } from "vitest";
 import { DEFAULT_SETTINGS, mergeSettings, specificAttachmentFolder } from "../../src/core/settings-data.ts";
 
 test("defaults when nothing saved", () => {
-	expect(mergeSettings(null)).toEqual({ templatePath: "", markerProperty: "wrapped-pdf", hidePairedPdfs: true, pendingRemovedPdfs: [] });
+	expect(mergeSettings(null)).toEqual({ templatePath: "", markerProperty: "wrapped-pdf", hidePairedPdfs: true, followDeletes: true, followRenames: true, pendingRemovedPdfs: [] });
 });
 
 test("keeps valid saved values and drops unknown keys", () => {
-	expect(mergeSettings({ templatePath: "T/pdf", markerProperty: "pdf", hidePairedPdfs: false, pendingRemovedPdfs: ["a/b.pdf"], app: {}, _attachmentsPath: "x" }))
-		.toEqual({ templatePath: "T/pdf", markerProperty: "pdf", hidePairedPdfs: false, pendingRemovedPdfs: ["a/b.pdf"] });
+	expect(mergeSettings({ templatePath: "T/pdf", markerProperty: "pdf", hidePairedPdfs: false, followDeletes: false, followRenames: false, pendingRemovedPdfs: ["a/b.pdf"], app: {}, _attachmentsPath: "x" }))
+		.toEqual({ templatePath: "T/pdf", markerProperty: "pdf", hidePairedPdfs: false, followDeletes: false, followRenames: false, pendingRemovedPdfs: ["a/b.pdf"] });
 });
 
 test("wrong types and blank marker fall back to defaults", () => {
-	expect(mergeSettings({ templatePath: 5, markerProperty: "  ", hidePairedPdfs: "yes", pendingRemovedPdfs: "x" })).toEqual(DEFAULT_SETTINGS);
+	expect(mergeSettings({ templatePath: 5, markerProperty: "  ", hidePairedPdfs: "yes", followDeletes: "no", followRenames: 0, pendingRemovedPdfs: "x" })).toEqual(DEFAULT_SETTINGS);
+});
+
+test("follow settings: false is kept, a non-boolean falls back to true", () => {
+	expect(mergeSettings({ followDeletes: false, followRenames: false })).toMatchObject({ followDeletes: false, followRenames: false });
+	expect(mergeSettings({ followDeletes: "false", followRenames: null })).toMatchObject({ followDeletes: true, followRenames: true });
+	expect(mergeSettings({})).toMatchObject({ followDeletes: true, followRenames: true });
 });
 
 test("marker name is trimmed", () => {

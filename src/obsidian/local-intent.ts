@@ -71,6 +71,15 @@ export class LocalIntent {
 	 * folder move or delete fires one event per child in no guaranteed order.
 	 */
 	consume(path: string): boolean {
+		return this.check(path, true);
+	}
+
+	/** What `consume(path)` would answer, without using a mark up. For diagnostics that must not take a mark from the Watcher. */
+	peek(path: string): boolean {
+		return this.check(path, false);
+	}
+
+	private check(path: string, useUp: boolean): boolean {
 		const now = Date.now();
 		for (const [markedPath, mark] of this.marks) {
 			if (mark.expires <= now) this.marks.delete(markedPath);
@@ -78,7 +87,7 @@ export class LocalIntent {
 
 		const exact = this.marks.get(path);
 		if (exact) {
-			if (!exact.folder) this.marks.delete(path);
+			if (useUp && !exact.folder) this.marks.delete(path);
 			return true;
 		}
 		for (const [markedPath, mark] of this.marks) {
