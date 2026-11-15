@@ -134,8 +134,9 @@ export class AutoWrapper {
 			return { kind: "wrapped", name };
 		} catch (error) {
 			if (error instanceof WrapIncomplete) return { kind: "incomplete", name, message: error.message };
-			// The note arrived after the snapshot: someone else wrapped it, which is what we wanted.
-			if (error instanceof WrapRefusal && error.reason === "note-exists") return { kind: "skipped" };
+			// The note arrived after the snapshot, or another wrap (a click, or "Wrap all") is creating it right now:
+			// someone else is wrapping it, which is what we wanted.
+			if (error instanceof WrapRefusal && (error.reason === "note-exists" || error.reason === "in-flight")) return { kind: "skipped" };
 			console.error("PDF Wrapper: could not wrap", path, error);
 			return { kind: "failed", message: error instanceof WrapMessage ? error.message : `Failed to wrap ${path}: ${reason(error)}` };
 		} finally {

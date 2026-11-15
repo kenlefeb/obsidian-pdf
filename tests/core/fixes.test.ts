@@ -1,5 +1,5 @@
 import { expect, test } from 'vitest';
-import { buildAttention, candidatesForMissing, copyPath, fixesFor, isBulkFixable, isCurrent, planFix } from '../../src/core/fixes.ts';
+import { buildAttention, candidatesForMissing, copyPath, fixesFor, isBulkFixable, isBulkWrappable, isCurrent, planFix } from '../../src/core/fixes.ts';
 import { classify } from '../../src/core/classify.ts';
 import type { Action, AttentionItem, AttentionKind, NoteClaim, Snapshot } from '../../src/core/types.ts';
 
@@ -58,6 +58,34 @@ test('buildAttention does not list a pending PDF a second time as unwrapped', ()
 	expect(buildAttention(cl, ['a/S.pdf'], { includeUnwrapped: true, attachmentFolder: null })).toEqual([
 		{ kind: 'note-removed', notePath: null, pdfPath: 'a/S.pdf', rawTarget: null },
 		{ kind: 'unwrapped', notePath: null, pdfPath: 'a/T.pdf', rawTarget: null }]);
+});
+
+test('buildAttention leaves out an unwrapped PDF with a same-name note beside it, ignoring letter case', () => {
+	const s = snap(['a/s.MD', 'b/T.md', 'a/U 1.md'], ['a/S.pdf', 'a/T.pdf', 'a/U.pdf'], []);
+	expect(buildAttention(classify(s), [], { includeUnwrapped: true, attachmentFolder: null, notePaths: s.notePaths }).map((i) => i.pdfPath))
+		.toEqual(['a/T.pdf', 'a/U.pdf']);
+});
+test('buildAttention still lists a note-removed PDF whose note is back unclaimed', () => {
+	const s = snap(['a/S.md'], ['a/S.pdf'], []);
+	expect(buildAttention(classify(s), ['a/S.pdf'], { includeUnwrapped: true, attachmentFolder: null, notePaths: s.notePaths }))
+		.toEqual([{ kind: 'note-removed', notePath: null, pdfPath: 'a/S.pdf', rawTarget: null }]);
+});
+
+// isBulkWrappable
+test('isBulkWrappable is true for a current unwrapped PDF with no note beside it', () => {
+	const s = snap(['b/S.md'], ['a/S.pdf'], []);
+	expect(isBulkWrappable(item('unwrapped', null, 'a/S.pdf', null), s)).toBe(true);
+	expect(isBulkWrappable(item('unwrapped', null, 'a/S.pdf', null), s, classify(s))).toBe(true);
+});
+test('isBulkWrappable is false when a same-name note sits beside the PDF, even unclaimed or in another case', () => {
+	expect(isBulkWrappable(item('unwrapped', null, 'a/S.pdf', null), snap(['a/S.md'], ['a/S.pdf'], []))).toBe(false);
+	expect(isBulkWrappable(item('unwrapped', null, 'a/S.pdf', null), snap(['A/s.md'], ['a/S.pdf'], []))).toBe(false);
+});
+test('isBulkWrappable is false for a claimed PDF, a gone PDF and other kinds', () => {
+	const claimed = snap(['b/T.md'], ['a/S.pdf'], [c('b/T.md', 'a/S.pdf')]);
+	expect(isBulkWrappable(item('unwrapped', null, 'a/S.pdf', null), claimed)).toBe(false);
+	expect(isBulkWrappable(item('unwrapped', null, 'a/S.pdf', null), snap([], [], []))).toBe(false);
+	expect(isBulkWrappable(item('note-removed', null, 'a/S.pdf', null), snap([], ['a/S.pdf'], []))).toBe(false);
 });
 
 // planFix: missing

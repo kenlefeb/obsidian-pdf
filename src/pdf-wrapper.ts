@@ -20,8 +20,8 @@ export class WrapMessage extends Error {
 
 /** A wrap that was refused before a note was created. (The template may have been created or repaired.) */
 export class WrapRefusal extends WrapMessage {
-	/** `note-exists`: a note already sits beside the PDF. */
-	constructor(message: string, readonly reason: "note-exists" | "other" = "other") {
+	/** `note-exists`: a note already sits beside the PDF. `in-flight`: the same note is being created by another wrap right now. */
+	constructor(message: string, readonly reason: "note-exists" | "in-flight" | "other" = "other") {
 		super(message);
 		this.name = "WrapRefusal";
 	}
@@ -35,7 +35,11 @@ export class WrapIncomplete extends WrapMessage {
 	}
 }
 
-/** Paths of the PDFs being wrapped right now, so a second wrap of the same PDF is refused. */
+/**
+ * The lower-cased note paths of the wraps running right now, so a second wrap that would create the same note is
+ * refused. Keyed by the note, not the PDF: `S.pdf` and `s.PDF` in one folder would race for one note path on a
+ * case-insensitive file system.
+ */
 const inFlight = new Set<string>();
 
 /** Where the note wrapping `pdf` lives: beside it, with the same base name. */
@@ -66,15 +70,15 @@ export async function wrapPdf(
 	pdfFile: TFile,
 	options: { open: boolean },
 ): Promise<TFile> {
-	if (inFlight.has(pdfFile.path)) {
-		throw new WrapRefusal(`${pdfFile.name} is already being wrapped.`);
+	const key = siblingNotePath(pdfFile).toLowerCase();
+	if (inFlight.has(key)) {
+		throw new WrapRefusal(`${pdfFile.name} is already being wrapped.`, "in-flight");
 	}
-	inFlight.add(pdfFile.path);
-	const pdfPath = pdfFile.path;
+	inFlight.add(key);
 	try {
 		return await wrapOnce(app, settings, saveSettings, pdfFile, options);
 	} finally {
-		inFlight.delete(pdfPath);
+		inFlight.delete(key);
 	}
 }
 

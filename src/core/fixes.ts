@@ -1,5 +1,6 @@
+import { noteBesidePdf } from "./attention.ts";
 import { classify } from "./classify.ts";
-import { basename, dirname, filename, isInFolder, joinPath } from "./paths.ts";
+import { basename, dirname, filename, isInFolder, isNote, joinPath, pairKey } from "./paths.ts";
 import type { Action, AttentionItem, AttentionKind, Classification, FixId, Snapshot } from "./types.ts";
 
 const FIXES: Record<AttentionKind, FixId[]> = {
@@ -17,10 +18,15 @@ export function fixesFor(kind: AttentionKind): FixId[] {
 	return [...FIXES[kind]];
 }
 
+/**
+ * The Needs attention list. With `includeUnwrapped`, unclaimed PDFs are listed too, except those in the attachment
+ * folder and those with a same-name note beside them in `notePaths` (ignoring letter case): such a PDF cannot be
+ * wrapped, so listing it would only nag.
+ */
 export function buildAttention(
 	c: Classification,
 	pendingRemoved: string[],
-	opts: { includeUnwrapped: boolean; attachmentFolder: string | null },
+	opts: { includeUnwrapped: boolean; attachmentFolder: string | null; notePaths?: string[] },
 ): AttentionItem[] {
 	const items: AttentionItem[] = [];
 	for (const pair of c.pairs) {
@@ -34,9 +40,11 @@ export function buildAttention(
 		items.push({ kind: "note-removed", notePath: null, pdfPath, rawTarget: null });
 	}
 	if (opts.includeUnwrapped) {
+		const noteKeys = new Set((opts.notePaths ?? []).filter(isNote).map(pairKey));
 		for (const pdfPath of c.unwrappedPdfs) {
 			if (removed.has(pdfPath)) continue;
 			if (opts.attachmentFolder !== null && isInFolder(pdfPath, opts.attachmentFolder)) continue;
+			if (noteKeys.has(pairKey(pdfPath))) continue;
 			items.push({ kind: "unwrapped", notePath: null, pdfPath, rawTarget: null });
 		}
 	}
@@ -87,9 +95,12 @@ function oldTargetsOf(item: AttentionItem, movedFrom: string | null): string[] {
 
 const STALE: Action[] = [{ type: "notice", message: "This has changed since it was listed. Check the list again." }];
 
-/** True when the item still describes the vault: its pair is in the same state with the same PDF, or its PDF is still unclaimed. */
-export function isCurrent(item: AttentionItem, snapshot: Snapshot): boolean {
-	const c = classify(snapshot);
+/**
+ * True when the item still describes the vault: its pair is in the same state with the same PDF, or its PDF is still
+ * unclaimed. `precomputed` is `classify(snapshot)` when the caller already has it.
+ */
+export function isCurrent(item: AttentionItem, snapshot: Snapshot, precomputed?: Classification): boolean {
+	const c = precomputed ?? classify(snapshot);
 	if (item.kind === "note-removed" || item.kind === "unwrapped") {
 		return item.pdfPath !== null && c.unwrappedPdfs.includes(item.pdfPath);
 	}
@@ -174,6 +185,15 @@ export function isBulkFixable(item: AttentionItem, snapshot: Snapshot): boolean 
 	const claims = snapshot.claims.filter((claim) => claim.pdfPath === item.pdfPath);
 	if (claims.length !== 1 || claims[0]?.notePath !== item.notePath) return false;
 	return !isTaken(partnerDestination(item.notePath, item.pdfPath), snapshot, item.pdfPath);
+}
+
+/**
+ * True when "Wrap all" would try this entry: an unwrapped PDF that is still unclaimed and has no same-name note beside
+ * it in the snapshot's note list (the vault's file list, which does not lag as the metadata cache can).
+ */
+export function isBulkWrappable(item: AttentionItem, snapshot: Snapshot, c?: Classification): boolean {
+	if (item.kind !== "unwrapped" || item.pdfPath === null) return false;
+	return noteBesidePdf(item.pdfPath, snapshot.notePaths) === null && isCurrent(item, snapshot, c);
 }
 
 /** `a/S.pdf` becomes `a/S 1.pdf`, then `a/S 2.pdf` and so on, skipping `taken` paths (compared ignoring letter case). */

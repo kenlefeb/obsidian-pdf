@@ -2,9 +2,10 @@ import { Notice, type App } from "obsidian";
 import type PdfWrapperPlugin from "../main.ts";
 import { bulkResultMessage, nextPendingRemoved, noteBesidePdf, noteBesidePdfMessage } from "../core/attention.ts";
 import { classify } from "../core/classify.ts";
-import { buildAttention, fixesFor, isBulkFixable, isCurrent, planFix } from "../core/fixes.ts";
+import { buildAttention, fixesFor, isBulkFixable, isBulkWrappable, planFix } from "../core/fixes.ts";
 import { specificAttachmentFolder } from "../core/settings-data.ts";
 import type { AttentionItem, Classification, FixId, Snapshot } from "../core/types.ts";
+import { WrapIncomplete, WrapMessage, WrapRefusal } from "../pdf-wrapper.ts";
 import type { Executor } from "./execute.ts";
 import { gatherSnapshot } from "./snapshot.ts";
 import { SETTLE_MS } from "./watcher.ts";
@@ -123,10 +124,12 @@ export class AttentionStore {
 			isBulkFixable(item, snapshot) ? fixesFor(item.kind)[0] ?? null : null);
 	}
 
-	/** Wraps every unwrapped PDF on the list. Resolves to the number wrapped. */
+	/**
+	 * Wraps every unwrapped PDF on the list that has no note beside it. Automatic wrapping may be wrapping the same
+	 * PDFs at the same time, so a PDF another wrap got to first is skipped, not a failure. Resolves to the number wrapped.
+	 */
 	wrapAll(): Promise<number> {
-		return this.bulkRun("wrap", (item, snapshot) =>
-			item.kind === "unwrapped" && isCurrent(item, snapshot) ? "wrap" : null);
+		return this.bulkRun("wrap", (item, snapshot) => isBulkWrappable(item, snapshot) ? "wrap" : null);
 	}
 
 	onChange(listener: () => void): () => void {
@@ -136,7 +139,8 @@ export class AttentionStore {
 
 	/**
 	 * Runs `pick`'s fix on each listed entry it accepts, one at a time, re-planning against a fresh snapshot
-	 * each time. Stops at the first failure.
+	 * each time. Stops at the first failure. Wraps run quietly: a refused wrap (another wrap got there first, or the
+	 * PDF cannot be wrapped) is skipped without a notice, and only another failure is reported here and stops the run.
 	 */
 	private bulkRun(kind: "fix" | "wrap", pick: (item: AttentionItem, snapshot: Snapshot) => FixId | null): Promise<number> {
 		return this.serial(async () => {
@@ -148,19 +152,32 @@ export class AttentionStore {
 					const snapshot = this.snapshot();
 					const fix = pick(item, snapshot);
 					if (fix === null) continue;
+					let counted = false;
 					try {
 						// False means a file vanished under us: that item is skipped, not counted, and the run goes on.
 						// Only a throw is a failure that stops the run.
-						if (await this.executor.run(planFix(item, fix, snapshot), { skipAfterRun: true })) {
-							done++;
-							// Let listeners (the explorer styling) see progress while the run goes on; not through `serial`.
-							await this.rescan([]);
-						}
+						counted = await this.executor.run(planFix(item, fix, snapshot), { skipAfterRun: true, quiet: kind === "wrap" });
 					} catch (error) {
-						// The Executor has already shown a notice naming the file and the reason.
-						console.error("PDF Wrapper: bulk fix failed", item, fix, error);
-						stopped = true;
-						break;
+						if (error instanceof WrapRefusal) {
+							// Automatic wrapping (or a click) is wrapping it, its note appeared, or it cannot be wrapped: skip it.
+							continue;
+						}
+						if (error instanceof WrapIncomplete) {
+							// The PDF is wrapped; only a later step failed. Say so and carry on.
+							new Notice(error.message);
+							counted = true;
+						} else {
+							// For a fix the Executor has already shown a notice; a quiet wrap leaves that to us.
+							if (kind === "wrap") new Notice(wrapFailureMessage(item.pdfPath, error));
+							console.error("PDF Wrapper: bulk fix failed", item, fix, error);
+							stopped = true;
+							break;
+						}
+					}
+					if (counted) {
+						done++;
+						// Let listeners (the explorer styling) see progress while the run goes on; not through `serial`.
+						await this.rescan([]);
 					}
 				}
 			} catch (error) {
@@ -204,11 +221,13 @@ export class AttentionStore {
 			this.list = buildAttention(c, pending, {
 				includeUnwrapped: this.isAutoWrapOn(),
 				attachmentFolder: attachmentFolder(this.plugin.app),
+				notePaths: snapshot.notePaths,
 			});
 			this.scanned = true;
 			this.bulk = {
 				fix: this.list.filter((item) => isBulkFixable(item, snapshot)).length,
-				wrap: this.list.filter((item) => item.kind === "unwrapped").length,
+				// The same test "Wrap all" applies to each entry, so the button's presence matches what it would attempt.
+				wrap: this.list.filter((item) => isBulkWrappable(item, snapshot, c)).length,
 			};
 		} catch (error) {
 			console.error("PDF Wrapper: could not check wrapped documents", error);
@@ -252,6 +271,12 @@ export class AttentionStore {
 			}
 		}
 	}
+}
+
+/** The notice for a wrap in "Wrap all" that failed, as the Executor would show it for a wrap that is not quiet. */
+function wrapFailureMessage(pdfPath: string | null, error: unknown): string {
+	if (error instanceof WrapMessage) return error.message;
+	return `Failed to wrap ${pdfPath ?? "a PDF"}: ${error instanceof Error ? error.message : String(error)}`;
 }
 
 function sameList(a: string[], b: string[]): boolean {

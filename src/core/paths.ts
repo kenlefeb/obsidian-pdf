@@ -52,3 +52,11 @@ export function findPathIgnoringCase(paths: string[], path: string): string | nu
 	const wanted = path.toLowerCase();
 	return paths.find((p) => p.toLowerCase() === wanted) ?? null;
 }
+
+/**
+ * The folder and base name, lower-cased: a note and a PDF that would pair on a case-insensitive file system share
+ * this key. Only meaningful between a note and a PDF; the extension is not part of it.
+ */
+export function pairKey(path: string): string {
+	return `${dirname(path)}/${basename(path)}`.toLowerCase();
+}
