@@ -50,7 +50,7 @@ When you do these inside Obsidian on this device, both files follow (as far as t
 | Rename or move a wrapped note | Renames or moves its PDF to match, and updates the marker property and the embed. |
 | Rename or move the PDF | Renames or moves the note to match. |
 | Rename or move a folder holding wrapped documents | Both files of each pair move together. |
-| Delete a wrapped note (or a folder holding wrapped documents) | Deletes its PDF too, in the same way (see below). The PDF is kept if another note still claims it. It is also kept, with a notice, if other notes still link to or embed it (for example after merging the note into another one with Note composer); it is then listed with "Its note was deleted; the PDF was kept". |
+| Delete a wrapped note (or a folder holding wrapped documents) | Deletes its PDF too, in the same way (see below). The PDF is kept if another note still claims it. It is also kept, with a notice, if another note links to or embeds it, as far as the plugin can tell at that moment (for example after merging the note into another one with Note composer); it is then listed with "Its note was deleted; the PDF was kept". The plugin asks Obsidian's link index and, because that index can lag a link added moments earlier, also reads the notes changed in the last 10 seconds. |
 | Duplicate a wrapped document (file menu on the note, or the command **Duplicate wrapped document**) | Copies both files, named the way Obsidian names copies (`Statement 1.md` and `Statement 1.pdf`), and points the copy at its own PDF. |
 | Copy a wrapped note with Obsidian's own copy action ("Make a copy", or "Duplicate" in some versions), or any other in-app copy | Does the same as **Duplicate wrapped document**: copies the PDF under the copy's name, beside the copy, and points the copy's marker property and embed at it. If a file with the PDF's new name already exists, nothing is overwritten: a notice says so and the copy is listed as pointing at another document's PDF. The original is unaffected. |
 
@@ -87,10 +87,10 @@ Run **Show documents needing attention** to open the list (**Check wrapped docum
 | PDF is in another folder | The PDF exists elsewhere. | Move PDF beside note |
 | Points at another document's PDF | The note is typically a copy. | Copy the PDF; Remove the claim |
 | Shares a PDF with 1 other note (or "N other notes") | Several notes claim one PDF and none of them matches it. | Per note: move or rename the PDF to this note; Copy the PDF; Remove the claim |
-| Its note was deleted; the PDF was kept | The note is gone and the PDF is left over: its note was removed outside Obsidian, or deleted in Obsidian with "Delete the PDF when its note is deleted in Obsidian" off. | Delete the PDF (asks first, then deletes the way Obsidian deletes files, following your "Deleted files" setting, which may be permanent); Wrap; Keep as a plain PDF |
+| Its note was deleted; the PDF was kept | The note is gone and the PDF is left over: its note was removed outside Obsidian, deleted in Obsidian with "Delete the PDF when its note is deleted in Obsidian" off, or deleted in Obsidian while other notes still link to or embed the PDF. | Delete the PDF (asks first, then deletes the way Obsidian deletes files, following your "Deleted files" setting, which may be permanent); Wrap; Keep as a plain PDF |
 | Not wrapped | Shown only when automatic wrapping is on for this device. PDFs in a named attachment folder, and PDFs with a note of the same name beside them (which cannot be wrapped), are left out. | Wrap |
 
-**Fix all** covers misnamed and displaced entries that have one claimant and a free destination; **Wrap all** covers the "Not wrapped" entries. Each appears only when the list, as last checked, has entries it covers. **Wrap all** skips, without a notice, a PDF that another wrap got to first (automatic wrapping may be running at the same time), whose note has just appeared, or that cannot be wrapped, and goes on with the rest; it stops only on any other failure. Nothing destructive is ever the default.
+**Fix all** covers misnamed and displaced entries that have one claimant and a free destination; **Wrap all** covers the "Not wrapped" entries, except PDFs whose names cannot be linked (their own **Wrap** button says why). Each appears only when the list, as last checked, has entries it covers. **Wrap all** skips, without a notice, a PDF that another wrap got to first (automatic wrapping may be running at the same time), whose note has just appeared, or that cannot be wrapped, and goes on with the rest; it stops on any other failure, including a Templater template that created no note. Nothing destructive is ever the default.
 
 The "Its note was deleted; the PDF was kept" entries are kept in the plugin's data so that they survive a restart. They are only a reminder; losing them loses nothing else.
 
@@ -125,6 +125,8 @@ You do not have to set anything up.
 - If any of this cannot be done, the wrap stops and a notice names the file and the reason.
 
 Placeholders are resolved by Templater when it is installed. Otherwise the core Templates placeholders `{{title}}`, `{{date}}` and `{{time}}` are used.
+
+With Templater, if Templater finishes without leaving a new note (expected when the template's code fails or you cancel one of its prompts; Templater shows its own message), the plugin says "Templater did not create a note for <PDF name>. Check its own message, fix the template or answer its prompt, then wrap again." Nothing is created and the PDF stays unwrapped. If the template renames or moves its own note, the plugin moves the note back beside the PDF and marks it; when it cannot tell which new note is the one Templater made (for example because another wrap ran at the same time), it names the new notes so you can move the right one by hand.
 
 The plugin no longer reads or writes the `attachment` / `attachments` properties. If you like to keep an `attachments` list, put it in your template; Obsidian's link updating can keep it current on rename, but that relies on its "Automatically update internal links" setting and has not been checked for links inside properties.
 

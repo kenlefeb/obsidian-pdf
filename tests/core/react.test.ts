@@ -245,20 +245,33 @@ test('shouldAutoWrap', () => {
 	expect(shouldAutoWrap('att/x.pdf', s, null)).toBe(true);
 	expect(shouldAutoWrap('gone.pdf', s, null)).toBe(false);
 });
-test('autoWrapChecker answers as shouldAutoWrap does, for every PDF of one snapshot', () => {
+test('autoWrapChecker gives the expected answer for every PDF of one snapshot, per attachment folder', () => {
 	const s = snap(['a/S.md', 'a/N.md', 'b/x.MD', 'S.md', 'a/Q.txt'],
 		['a/S.pdf', 'a/N.pdf', 'a/New.pdf', 'att/x.pdf', 'b/X.pdf', 'S.pdf', 'a/Q.pdf', 'A/n.PDF'],
 		[c('a/S.md', 'a/S.pdf'), c('S.md', 'a/New.pdf')]);
-	for (const folder of [null, 'att', '']) {
+	// a/S.pdf: claimed. a/N.pdf: note beside it. a/New.pdf: claimed by a note elsewhere. b/X.pdf: note beside it in
+	// another letter case. S.pdf: note beside it at the root. A/n.PDF: folder differs only by case. a/Q.pdf: a .txt of
+	// that name is not a note. gone.pdf: not in the vault. The attachment folder '' is the whole vault.
+	const expected: Record<string, [boolean, boolean, boolean]> = {
+		//               null   'att'  ''
+		'a/S.pdf':      [false, false, false],
+		'a/N.pdf':      [false, false, false],
+		'a/New.pdf':    [false, false, false],
+		'att/x.pdf':    [true, false, false],
+		'b/X.pdf':      [false, false, false],
+		'S.pdf':        [false, false, false],
+		'a/Q.pdf':      [true, true, false],
+		'A/n.PDF':      [false, false, false],
+		'gone.pdf':     [false, false, false],
+	};
+	const folders = [null, 'att', ''];
+	folders.forEach((folder, i) => {
 		const check = autoWrapChecker(s, folder);
-		for (const pdf of [...s.pdfPaths, 'gone.pdf']) expect([pdf, folder, check(pdf)]).toEqual([pdf, folder, shouldAutoWrap(pdf, s, folder)]);
-	}
-	const check = autoWrapChecker(s, null);
-	expect(check('a/New.pdf')).toBe(false); // claimed by a note elsewhere
-	expect(check('b/X.pdf')).toBe(false);   // note of that name, other letter case
-	expect(check('A/n.PDF')).toBe(false);   // folder differs only by case
-	expect(check('a/Q.pdf')).toBe(true);    // a .txt of that name is not a note
-	expect(check('att/x.pdf')).toBe(true);
+		for (const [pdf, answers] of Object.entries(expected)) {
+			expect([pdf, folder, check(pdf)]).toEqual([pdf, folder, answers[i]]);
+			expect([pdf, folder, shouldAutoWrap(pdf, s, folder)]).toEqual([pdf, folder, answers[i]]);
+		}
+	});
 });
 
 // An in-app copy of a wrapped note: copy its PDF under the copy's name and point the copy at it.

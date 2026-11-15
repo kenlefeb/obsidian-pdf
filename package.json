@@ -1,7 +1,7 @@
 {
 	"name": "obsidian-pdf-wrapper",
 	"version": "2.0.0",
-	"description": "Wraps a PDF file with a markdown note using a configurable template.",
+	"description": "Keeps a markdown note and its same-named PDF together as one document: renames, moves, deletes and duplicates follow across the pair, and broken pairs are listed with one-click fixes.",
 	"main": "main.js",
 	"type": "module",
 	"scripts": {
