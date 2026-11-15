@@ -80,8 +80,10 @@ test("a replaceSync failure disables the sheet with one warning", () => {
 	}
 	vi.stubGlobal("CSSStyleSheet", Broken);
 	const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
-	const style = new ExplorerStyle(fakeDoc() as unknown as Document);
+	const doc = fakeDoc();
+	const style = new ExplorerStyle(doc as unknown as Document);
 	style.update(pairs, true);
 	style.update(pairs, false);
 	expect(warn).toHaveBeenCalledTimes(1);
+	expect(doc.adoptedStyleSheets).toHaveLength(0);
 });

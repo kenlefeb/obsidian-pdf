@@ -107,7 +107,7 @@ export class AttentionStore {
 				}
 				const actions = planFix(item, fix, this.snapshot(), chosenPdf);
 				ranActions = actions.some((a) => a.type !== "notice");
-				await this.executor.run(actions);
+				await this.executor.run(actions, { skipAfterRun: true });
 			} catch (error) {
 				// The Executor has already shown a notice naming the file and the reason.
 				console.error("PDF Wrapper: fix failed", item, fix, error);
@@ -151,7 +151,11 @@ export class AttentionStore {
 					try {
 						// False means a file vanished under us: that item is skipped, not counted, and the run goes on.
 						// Only a throw is a failure that stops the run.
-						if (await this.executor.run(planFix(item, fix, snapshot))) done++;
+						if (await this.executor.run(planFix(item, fix, snapshot), { skipAfterRun: true })) {
+							done++;
+							// Let listeners (the explorer styling) see progress while the run goes on; not through `serial`.
+							await this.rescan([]);
+						}
 					} catch (error) {
 						// The Executor has already shown a notice naming the file and the reason.
 						console.error("PDF Wrapper: bulk fix failed", item, fix, error);

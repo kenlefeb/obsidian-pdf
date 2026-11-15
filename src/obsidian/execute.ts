@@ -3,6 +3,7 @@ import type { OwnChanges } from "../core/marks.ts";
 import type { Action } from "../core/types.ts";
 import type { PdfWrapperSettings } from "../core/settings-data.ts";
 import { siblingNotePath, wrapPdf, WrapIncomplete, WrapMessage } from "../pdf-wrapper.ts";
+import { thenHook } from "../core/then-hook.ts";
 import { EmbedUpdateError, writeClaim } from "./snapshot.ts";
 
 /** What became of one action: carried out, or skipped because a file it needs is no longer there. */
@@ -25,19 +26,13 @@ export class Executor {
 	 * Runs the actions one after another. Resolves true when every action ran, false when it stopped
 	 * quietly because a file an action needs is no longer there (the vault changed under us; recheck).
 	 * On a failure it stops, shows a Notice naming the file and the reason, and rethrows.
+	 * With `skipAfterRun`, the `afterRun` hook is not called (the caller refreshes itself).
 	 * With `quiet`, a `wrap` action (and only that) shows no Notice of its own: its failure, and a WrapIncomplete
 	 * (the PDF is wrapped but a later step failed), are thrown for the caller to report.
 	 */
-	async run(actions: Action[], options: { quiet?: boolean } = {}): Promise<boolean> {
-		try {
-			return await this.runAll(actions, options.quiet === true);
-		} finally {
-			try {
-				this.afterRun();
-			} catch (error) {
-				console.error("PDF Wrapper: after-run hook failed", error);
-			}
-		}
+	async run(actions: Action[], options: { quiet?: boolean; skipAfterRun?: boolean } = {}): Promise<boolean> {
+		const task = () => this.runAll(actions, options.quiet === true);
+		return options.skipAfterRun === true ? task() : thenHook(task, this.afterRun);
 	}
 
 	private async runAll(actions: Action[], quiet: boolean): Promise<boolean> {

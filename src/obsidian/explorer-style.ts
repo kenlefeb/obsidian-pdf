@@ -65,7 +65,11 @@ export function installExplorerStyle(plugin: Plugin, store: AttentionStore, shou
 		timer = null;
 		// Before the first scan the classification is empty, which would only un-hide rows.
 		if (unloaded || !store.hasScanned()) return;
-		style.update(healthyPairs(store.classification()), shouldHide());
+		try {
+			style.update(healthyPairs(store.classification()), shouldHide());
+		} catch (error) {
+			console.warn("PDF Wrapper: could not rebuild the file explorer styling; it stays as it was.", error);
+		}
 	};
 	const rebuild = () => {
 		if (unloaded) return;
