@@ -1,7 +1,7 @@
 # Name-independent pairing — design change
 
 Date: 2026-11-15
-Status: awaiting approval
+Status: approved by owner 2026-11-15
 Amends: `2026-11-15-paired-pdf-documents-design.md` (this would become its revision 7)
 
 ## Why
