@@ -41,3 +41,15 @@ export interface Reaction {
 	recheck: boolean;
 	pendingRemoved: string | null;
 }
+
+export type AttentionKind = Exclude<PairState, "healthy"> | "note-removed" | "unwrapped";
+
+export interface AttentionItem {
+	kind: AttentionKind;
+	notePath: string | null;
+	pdfPath: string | null;
+	rawTarget: string | null;
+}
+
+export type FixId = "rename-pdf-to-note" | "rename-note-to-pdf" | "move-pdf-to-note" | "copy-pdf-for-note"
+	| "choose-pdf" | "remove-claim" | "delete-pdf" | "wrap" | "keep-plain";
