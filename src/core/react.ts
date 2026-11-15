@@ -53,7 +53,8 @@ function reactToNoteRename(path: string, oldPath: string, local: boolean, snapsh
 	const claim = snapshot.claims.find((c) => c.notePath === path);
 	if (!claim) return nothing();
 	if (claim.pdfPath !== null && samePair(path, claim.pdfPath)) {
-		if (!local) return nothing(true);
+		// Already canonical (typically after a folder move): rewriting it would only churn the note's mtime and sync.
+		if (!local || claim.rawTarget === claim.pdfPath) return nothing(true);
 		return { actions: [{ type: "setClaim", notePath: path, pdfPath: claim.pdfPath, oldTargets: [] }], recheck: false, pendingRemoved: null };
 	}
 	if (claim.pdfPath !== null && samePair(oldPath, claim.pdfPath)) {
@@ -81,7 +82,7 @@ function reactToPdfRename(path: string, oldPath: string, local: boolean, snapsho
 	if (!claim) return nothing();
 	const note = claim.notePath;
 	if (samePair(note, path)) {
-		if (!local) return nothing(true);
+		if (!local || claim.rawTarget === path) return nothing(true);
 		return { actions: [{ type: "setClaim", notePath: note, pdfPath: path, oldTargets: [] }], recheck: false, pendingRemoved: null };
 	}
 	return followRename(path, note, oldPath, local, snapshot, (to) => ({ notePath: to, pdfPath: path }));

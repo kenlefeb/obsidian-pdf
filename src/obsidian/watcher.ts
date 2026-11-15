@@ -71,6 +71,8 @@ export class Watcher {
 	start(): void {
 		const { workspace, vault, metadataCache } = this.plugin.app;
 		workspace.onLayoutReady(() => {
+			// Disabled before the layout was ready: register nothing.
+			if (this.unloaded) return;
 			this.plugin.registerEvent(vault.on("rename", (file, oldPath) => this.onRename(file, oldPath)));
 			this.plugin.registerEvent(vault.on("create", (file) => this.onCreate(file)));
 			this.plugin.registerEvent(vault.on("delete", (file) => this.onPdfDelete(file)));

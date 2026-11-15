@@ -68,7 +68,7 @@ export function bulkResultMessage(kind: "fix" | "wrap", done: number, stopped: b
 
 /** The startup notice when the list is not empty. */
 export function attentionNotice(count: number): string {
-	return count === 1 ? "1 wrapped document needs attention" : `${count} wrapped documents need attention`;
+	return count === 1 ? "1 document needs attention" : `${count} documents need attention`;
 }
 
 /**

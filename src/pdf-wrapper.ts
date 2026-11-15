@@ -36,6 +36,20 @@ export class WrapIncomplete extends WrapMessage {
 }
 
 /**
+ * Templater ran without an error but returned no note, and none is at the expected path: the template renamed or
+ * moved its own note. Shown as it is (after "Failed to wrap"), not as "Could not create".
+ */
+class TemplaterNoteElsewhere extends Error {
+	constructor(pdfName: string, markerProperty: string) {
+		super(
+			`Templater created the note somewhere else and it could not be found. Look for a new note, move it beside ${pdfName}, ` +
+			`and add the "${markerProperty}" property — or change the template so it does not rename or move its note.`,
+		);
+		this.name = "TemplaterNoteElsewhere";
+	}
+}
+
+/**
  * The lower-cased note paths of the wraps running right now, so a second wrap that would create the same note is
  * refused. Keyed by the note, not the PDF: `S.pdf` and `s.PDF` in one folder would race for one note path on a
  * case-insensitive file system.
@@ -109,8 +123,9 @@ async function wrapOnce(
 
 	let note: TFile;
 	try {
-		note = await createNoteFromTemplate(app, templateFile, folder, pdfFile.basename);
+		note = await createNoteFromTemplate(app, templateFile, folder, pdfFile, settings.markerProperty);
 	} catch (e) {
+		if (e instanceof TemplaterNoteElsewhere) throw e;
 		// Templater may have created the file before failing.
 		const left = app.vault.getAbstractFileByPath(notePath);
 		if (left instanceof TFile) throw notMarked(left.path, pdfFile, settings.markerProperty, e);
@@ -306,43 +321,44 @@ async function createNoteFromTemplate(
 	app: App,
 	templateFile: TFile,
 	folder: TFolder,
-	filename: string,
+	pdfFile: TFile,
+	markerProperty: string,
 ): Promise<TFile> {
+	const filename = pdfFile.basename;
+	const notePath = normalizePath(folder.isRoot() ? `${filename}.md` : `${folder.path}/${filename}.md`);
+
 	// Try Templater plugin first — it handles its own placeholder resolution
 	const templater = getTemplaterPlugin(app);
 	if (templater) {
+		let created: TFile | undefined;
+		let ran = false;
 		try {
-			const created: TFile | undefined = await templater.templater.create_new_note_from_template(
-				templateFile, folder, filename, false,
-			);
-			if (created instanceof TFile) return created;
-
-			// Templater may not return the file; look it up
-			const expectedPath = normalizePath(
-				folder.isRoot() ? `${filename}.md` : `${folder.path}/${filename}.md`
-			);
-			const found = app.vault.getAbstractFileByPath(expectedPath);
-			if (found instanceof TFile) return found;
+			created = await templater.templater.create_new_note_from_template(templateFile, folder, filename, false);
+			ran = true;
 		} catch (e) {
 			// Templater may have written the note before failing; use it rather than fail on "already exists".
-			const left = app.vault.getAbstractFileByPath(normalizePath(
-				folder.isRoot() ? `${filename}.md` : `${folder.path}/${filename}.md`
-			));
+			const left = app.vault.getAbstractFileByPath(notePath);
 			if (left instanceof TFile) {
 				console.warn("PDF Wrapper: Templater failed after creating the note; using the note it created", e);
 				return left;
 			}
 			console.warn("PDF Wrapper: Templater failed, falling back to manual creation", e);
 		}
+		if (ran) {
+			if (created instanceof TFile) return created;
+			// Templater may not return the file; look it up
+			const found = app.vault.getAbstractFileByPath(notePath);
+			if (found instanceof TFile) return found;
+			// It ran and made a note we cannot find (the template renamed or moved it). Creating another here would
+			// leave a second note nobody is told about.
+			throw new TemplaterNoteElsewhere(pdfFile.name, markerProperty);
+		}
 	}
 
-	// Fallback: create file manually and resolve core Templates placeholders
+	// Fallback (Templater not installed, or it threw before creating anything): create the file manually and
+	// resolve core Templates placeholders
 	const raw = await app.vault.read(templateFile);
 	const content = resolveCoreTemplatePlaceholders(app, raw, filename);
-
-	const notePath = normalizePath(
-		folder.isRoot() ? `${filename}.md` : `${folder.path}/${filename}.md`
-	);
 	return await app.vault.create(notePath, content);
 }
 

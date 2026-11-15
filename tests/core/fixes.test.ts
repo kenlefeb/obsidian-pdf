@@ -1,5 +1,5 @@
 import { expect, test } from 'vitest';
-import { buildAttention, candidatesForMissing, copyPath, fixesFor, isBulkFixable, isBulkWrappable, isCurrent, planFix } from '../../src/core/fixes.ts';
+import { buildAttention, candidatesForMissing, fixesFor, isBulkFixable, isBulkWrappable, isCurrent, planFix } from '../../src/core/fixes.ts';
 import { classify } from '../../src/core/classify.ts';
 import type { Action, AttentionItem, AttentionKind, NoteClaim, Snapshot } from '../../src/core/types.ts';
 
@@ -224,14 +224,6 @@ test('wrap, for a removed note and for an unwrapped PDF', () => {
 	expect(planFix(item('unwrapped', null, 'a/S.pdf', null), 'wrap', s)).toEqual([{ type: 'wrap', pdfPath: 'a/S.pdf' }]);
 });
 
-test('copyPath numbering', () => {
-	expect(copyPath('a/S.pdf', new Set())).toBe('a/S 1.pdf');
-	expect(copyPath('a/S.pdf', new Set(['a/S 1.pdf', 'a/S 1.md']))).toBe('a/S 2.pdf');
-	expect(copyPath('S.md', new Set())).toBe('S 1.md');
-});
-test('copyPath compares taken paths ignoring letter case and keeps extension case', () => {
-	expect(copyPath('a/S.PDF', new Set(['a/s 1.pdf']))).toBe('a/S 2.PDF');
-});
 
 test('candidatesForMissing orders same-folder first and skips claimed PDFs', () => {
 	const s = snap(['a/S.md', 'b/Other.md'],

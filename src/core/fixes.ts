@@ -202,15 +202,3 @@ export function isBulkWrappable(item: AttentionItem, snapshot: Snapshot, c?: Cla
 	if (item.kind !== "unwrapped" || item.pdfPath === null) return false;
 	return noteBesidePdf(item.pdfPath, snapshot.notePaths) === null && isCurrent(item, snapshot, c);
 }
-
-/** `a/S.pdf` becomes `a/S 1.pdf`, then `a/S 2.pdf` and so on, skipping `taken` paths (compared ignoring letter case). */
-export function copyPath(path: string, taken: ReadonlySet<string>): string {
-	const lowered = new Set([...taken].map((p) => p.toLowerCase()));
-	const dir = dirname(path);
-	const base = basename(path);
-	const ext = ownExtension(path);
-	for (let n = 1; ; n++) {
-		const candidate = joinPath(dir, `${base} ${n}${ext}`);
-		if (!lowered.has(candidate.toLowerCase())) return candidate;
-	}
-}

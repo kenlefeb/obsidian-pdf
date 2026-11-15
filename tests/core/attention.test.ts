@@ -81,9 +81,9 @@ test('bulkResultMessage reports how many were done, and says so when it stopped 
 });
 
 // attentionNotice
-test('attentionNotice says how many wrapped documents need attention', () => {
-	expect(attentionNotice(3)).toBe('3 wrapped documents need attention');
-	expect(attentionNotice(1)).toBe('1 wrapped document needs attention');
+test('attentionNotice says how many documents need attention (entries may be PDFs that are not wrapped)', () => {
+	expect(attentionNotice(3)).toBe('3 documents need attention');
+	expect(attentionNotice(1)).toBe('1 document needs attention');
 });
 
 // noteBesidePdf

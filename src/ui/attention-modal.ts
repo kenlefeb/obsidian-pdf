@@ -10,6 +10,8 @@ export class AttentionModal extends Modal {
 	private untrack: (() => void) | null = null;
 	/** Fixes clicked here whose task has not settled yet; while any is, every button stays disabled. */
 	private running = 0;
+	/** The check started on open has finished without any check ever completing. */
+	private checkFailed = false;
 
 	constructor(app: App, private readonly store: AttentionStore) {
 		super(app);
@@ -22,7 +24,14 @@ export class AttentionModal extends Modal {
 		this.setTitle("Documents needing attention");
 		this.unsubscribe = this.store.onChange(() => this.render());
 		this.render();
-		if (!this.store.hasScanned()) void this.store.refresh();
+		if (!this.store.hasScanned()) {
+			void this.store.refresh().then(() => {
+				// A failed check keeps no list; say so rather than stay on "Checking…".
+				if (this.unsubscribe === null || this.store.hasScanned()) return;
+				this.checkFailed = true;
+				this.render();
+			});
+		}
 	}
 
 	onClose(): void {
@@ -37,7 +46,8 @@ export class AttentionModal extends Modal {
 		const { contentEl } = this;
 		contentEl.empty();
 		if (!this.store.hasScanned()) {
-			contentEl.createEl("p", { text: "Checking…", cls: "pdf-wrapper-attention-empty" });
+			const text = this.checkFailed ? "Could not check wrapped documents. Close this and try again." : "Checking…";
+			contentEl.createEl("p", { text, cls: "pdf-wrapper-attention-empty" });
 			return;
 		}
 		const items = this.store.items();

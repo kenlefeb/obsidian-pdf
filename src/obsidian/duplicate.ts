@@ -50,6 +50,8 @@ export async function duplicateWrapped(
 			["claim", { type: "setClaim", notePath: target.note, pdfPath: target.pdf, oldTargets }],
 		];
 		let stopped = false;
+		// Deliberately not stopped when the plugin unloads: the remaining steps run, because a finished copy is safer
+		// than a half-made one (a copied note still claiming the original's PDF). The Watcher does the same.
 		for (const [step, action] of steps) {
 			try {
 				if (!(await executor.run([action]))) {

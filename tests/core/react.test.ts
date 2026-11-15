@@ -57,12 +57,22 @@ test('PDF rename destination taken only by case is also notice-only', () => {
 		snap(['a/Old.md', 'a/new.md'], ['a/New.pdf'], [c('a/Old.md', 'a/New.pdf')]));
 	expect(r.actions.map(a => a.type)).toEqual(['notice']); expect(r.recheck).toBe(true);
 });
-test('folder move: partner already beside the note → setClaim only', () => {
+test('folder move: partner already beside the note, claim not canonical → setClaim only', () => {
 	const r = react({ kind: 'rename', path: 'z/S.md', oldPath: 'a/S.md', local: true },
-		snap(['z/S.md'], ['z/S.pdf'], [c('z/S.md', 'z/S.pdf')]));
+		snap(['z/S.md'], ['z/S.pdf'], [c('z/S.md', 'z/S.pdf', 'S.pdf')]));
 	expect(r).toEqual({
 		actions: [{ type: 'setClaim', notePath: 'z/S.md', pdfPath: 'z/S.pdf', oldTargets: [] }],
 		recheck: false, pendingRemoved: null });
+});
+test('folder move: partner already beside the note, claim already canonical → nothing written', () => {
+	const r = react({ kind: 'rename', path: 'z/S.md', oldPath: 'a/S.md', local: true },
+		snap(['z/S.md'], ['z/S.pdf'], [c('z/S.md', 'z/S.pdf', 'z/S.pdf')]));
+	expect(r).toEqual({ actions: [], recheck: true, pendingRemoved: null });
+});
+test('PDF rename that keeps the pair intact, claim already canonical → nothing written', () => {
+	const r = react({ kind: 'rename', path: 'a/S.PDF', oldPath: 'a/S.pdf', local: true },
+		snap(['a/S.md'], ['a/S.PDF'], [c('a/S.md', 'a/S.PDF', 'a/S.PDF')]));
+	expect(r).toEqual({ actions: [], recheck: true, pendingRemoved: null });
 });
 test('folder move: partner event not yet arrived → recheck only', () => {
 	const r = react({ kind: 'rename', path: 'z/S.md', oldPath: 'a/S.md', local: true },
@@ -107,7 +117,7 @@ test('non-local PDF rename does nothing but asks for a recheck', () => {
 });
 test('PDF rename that keeps the pair intact (extension case only) → setClaim only', () => {
 	const r = react({ kind: 'rename', path: 'a/S.PDF', oldPath: 'a/S.pdf', local: true },
-		snap(['a/S.md'], ['a/S.PDF'], [c('a/S.md', 'a/S.PDF')]));
+		snap(['a/S.md'], ['a/S.PDF'], [c('a/S.md', 'a/S.PDF', 'a/S.pdf')]));
 	expect(r).toEqual({
 		actions: [{ type: 'setClaim', notePath: 'a/S.md', pdfPath: 'a/S.PDF', oldTargets: [] }],
 		recheck: false, pendingRemoved: null });

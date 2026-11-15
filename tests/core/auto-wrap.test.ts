@@ -120,7 +120,7 @@ test('a skipped PDF is silent and not a failure', () => {
 });
 
 test('the stopped notice has one full stop after the reason, whether or not the reason had one', () => {
-	const tail = 'Unwrapped PDFs are listed under documents needing attention.';
+	const tail = 'PDFs that are not wrapped are listed under documents needing attention.';
 	expect(stoppedMessage('disk full')).toBe(`Automatic wrapping stopped: disk full. ${tail}`);
 	expect(stoppedMessage('disk full.')).toBe(`Automatic wrapping stopped: disk full. ${tail}`);
 	expect(stoppedMessage('disk full. ')).toBe(`Automatic wrapping stopped: disk full. ${tail}`);

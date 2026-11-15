@@ -1,3 +1,4 @@
+import { findFrontmatter } from "./frontmatter.ts";
 import { joinPath } from "./paths.ts";
 
 export const DEFAULT_TEMPLATE_NAME = "Wrapped PDF.md";
@@ -28,33 +29,8 @@ export interface TemplateCheck {
 	added: ("marker" | "embed")[];
 }
 
-interface Frontmatter {
-	/** Offset just after the opening fence line, including its line ending. */
-	blockStart: number;
-	/** Offset where the closing fence line starts. */
-	blockEnd: number;
-	/** Offset just after the closing fence line, including its line ending. */
-	bodyStart: number;
-}
-
 function stripCr(line: string): string {
 	return line.endsWith("\r") ? line.slice(0, -1) : line;
-}
-
-function findFrontmatter(text: string): Frontmatter | null {
-	const firstEnd = text.indexOf("\n");
-	if (firstEnd < 0 || stripCr(text.slice(0, firstEnd)) !== "---") return null;
-	let pos = firstEnd + 1;
-	while (pos <= text.length) {
-		const next = text.indexOf("\n", pos);
-		const lineEnd = next < 0 ? text.length : next;
-		if (stripCr(text.slice(pos, lineEnd)) === "---") {
-			return { blockStart: firstEnd + 1, blockEnd: pos, bodyStart: next < 0 ? text.length : next + 1 };
-		}
-		if (next < 0) break;
-		pos = next + 1;
-	}
-	return null;
 }
 
 function escapeRegExp(s: string): string {
@@ -79,7 +55,7 @@ function hasEmbed(body: string): boolean {
  * everything else stays byte-for-byte, because templates may hold Templater code.
  */
 export function ensureTemplateComponents(input: string, markerProperty: string): TemplateCheck {
-	const bom = input.startsWith("﻿") ? "﻿" : "";
+	const bom = input.startsWith("\uFEFF") ? "\uFEFF" : "";
 	const text = input.slice(bom.length);
 	const added: ("marker" | "embed")[] = [];
 	const fm = findFrontmatter(text);

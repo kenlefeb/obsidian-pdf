@@ -99,5 +99,5 @@ export function summarizeWraps(outcomes: WrapOutcome[]): string[] {
 /** The notice for a pass that stopped on an unexpected error. */
 export function stoppedMessage(reason: string): string {
 	const trimmed = reason.trim().replace(/\.+$/, "");
-	return `Automatic wrapping stopped: ${trimmed}. Unwrapped PDFs are listed under documents needing attention.`;
+	return `Automatic wrapping stopped: ${trimmed}. PDFs that are not wrapped are listed under documents needing attention.`;
 }
