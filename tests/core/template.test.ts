@@ -96,3 +96,85 @@ test("running it twice changes nothing the second time", () => {
 	const once = ensureTemplateComponents("hello", "m").text;
 	expect(ensureTemplateComponents(once, "m")).toEqual({ text: once, added: [] });
 });
+
+test("frontmatter that ends the file without a newline keeps its closing fence", () => {
+	const embed = "![[{{title}}.pdf]]";
+	expect(ensureTemplateComponents("---\nm:\n---", "m").text).toBe(`---\nm:\n---\n${embed}\n`);
+	expect(ensureTemplateComponents("---\r\nm:\r\n---", "m").text).toBe(`---\r\nm:\r\n---\r\n${embed}\r\n`);
+	expect(ensureTemplateComponents("---\n---", "m").text).toBe(`---\nm:\n---\n${embed}\n`);
+	expect(ensureTemplateComponents("---\r\n---", "m").text).toBe(`---\r\nm:\r\n---\r\n${embed}\r\n`);
+});
+
+test("the line ending comes from the opening fence, not from a stray CRLF in the body", () => {
+	const r = ensureTemplateComponents("---\ntitle: x\n---\nline\r\n![[a.pdf]]\n", "m");
+	expect(r.text).toBe("---\nm:\ntitle: x\n---\nline\r\n![[a.pdf]]\n");
+});
+
+test("without frontmatter the first line ending in the text decides", () => {
+	expect(ensureTemplateComponents("a\r\nb\n", "m").text).toBe("---\r\nm:\r\n---\r\n\r\na\r\nb\n\r\n![[{{title}}.pdf]]\r\n");
+});
+
+test("a leading BOM is kept and frontmatter is found after it", () => {
+	const r = ensureTemplateComponents("\uFEFF---\ntitle: x\n---\n![[a.pdf]]\n", "m");
+	expect(r.text).toBe("\uFEFF---\nm:\ntitle: x\n---\n![[a.pdf]]\n");
+	expect(r.added).toEqual(["marker"]);
+	expect(ensureTemplateComponents("\uFEFFhello", "m").text).toBe("\uFEFF---\nm:\n---\n\nhello\n\n![[{{title}}.pdf]]\n");
+});
+
+test("leading blank lines before the fence mean there is no frontmatter", () => {
+	const r = ensureTemplateComponents("\n---\nm:\n---\n![[a.pdf]]\n", "m");
+	expect(r.text).toBe("---\nm:\n---\n\n\n---\nm:\n---\n![[a.pdf]]\n");
+	expect(r.added).toEqual(["marker"]);
+});
+
+test("a quoted marker key counts as present", () => {
+	expect(ensureTemplateComponents('---\n"wrapped-pdf": x\n---\n![[a.pdf]]\n', "wrapped-pdf").added).toEqual([]);
+	expect(ensureTemplateComponents("---\n'wrapped-pdf': x\n---\n![[a.pdf]]\n", "wrapped-pdf").added).toEqual([]);
+});
+
+const awkward: Record<string, string> = {
+	"fence at EOF": "---\nm:\n---",
+	"fence at EOF, no marker": "---\ntitle: x\n---",
+	"empty frontmatter at EOF": "---\n---",
+	"CRLF fence at EOF": "---\r\nm:\r\n---",
+	"CRLF empty frontmatter at EOF": "---\r\n---",
+	"CRLF with frontmatter": "---\r\ntitle: x\r\n---\r\nbody\r\n",
+	"CRLF without frontmatter": "body\r\nmore\r\n",
+	"--- later in the body": "---\ntitle: x\n---\nbody\n---\nmore\n",
+	"body without trailing newline": "---\ntitle: x\n---\nbody",
+	BOM: "\uFEFF---\ntitle: x\n---\nbody\n",
+	"BOM without frontmatter": "\uFEFFbody",
+	empty: "",
+	"Templater code in frontmatter": "---\ncreated: <% tp.date.now() %>\nx: <% tp.file.title | y %>\n---\n# t\n",
+	"unclosed fence": "---\ntitle: x\nbody",
+};
+
+for (const [name, original] of Object.entries(awkward)) {
+	test(`invariants: ${name}`, () => {
+		const r = ensureTemplateComponents(original, "m");
+		expect(ensureTemplateComponents(r.text, "m")).toEqual({ text: r.text, added: [] });
+
+		let rest = r.text;
+		const bom = rest.startsWith("\uFEFF") ? "\uFEFF" : "";
+		rest = rest.slice(bom.length);
+		const eol = /^---\r\n/.test(rest) || (!/^---\n/.test(rest) && rest.includes("\r\n")) ? "\r\n" : "\n";
+		if (r.added.includes("embed")) {
+			expect(rest.endsWith(`![[{{title}}.pdf]]${eol}`)).toBe(true);
+			rest = rest.slice(0, -`![[{{title}}.pdf]]${eol}`.length);
+		}
+		if (r.added.includes("marker")) {
+			const prefix = `---${eol}m:${eol}---${eol}${eol}`;
+			if (rest.startsWith(prefix)) rest = rest.slice(prefix.length);
+			else {
+				const marker = `m:${eol}`;
+				const at = rest.indexOf(eol) + eol.length;
+				expect(rest.slice(at, at + marker.length)).toBe(marker);
+				rest = rest.slice(0, at) + rest.slice(at + marker.length);
+			}
+		}
+		const original2 = original.slice(original.startsWith("\uFEFF") ? 1 : 0);
+		expect(bom === (original.startsWith("\uFEFF") ? "\uFEFF" : "")).toBe(true);
+		expect(rest.startsWith(original2)).toBe(true);
+		expect(rest.slice(original2.length)).toMatch(/^[\r\n]*$/);
+	});
+}

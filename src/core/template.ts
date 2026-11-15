@@ -62,7 +62,7 @@ function escapeRegExp(s: string): string {
 }
 
 function hasMarker(block: string, marker: string): boolean {
-	const re = new RegExp(`^${escapeRegExp(marker)}\\s*:`);
+	const re = new RegExp(`^["']?${escapeRegExp(marker)}["']?\\s*:`);
 	return block.split("\n").some((line) => re.test(stripCr(line)));
 }
 
@@ -78,11 +78,13 @@ function hasEmbed(body: string): boolean {
  * Makes sure a template has the marker property and a PDF embed. Only inserts text;
  * everything else stays byte-for-byte, because templates may hold Templater code.
  */
-export function ensureTemplateComponents(text: string, markerProperty: string): TemplateCheck {
-	const eol = text.includes("\r\n") ? "\r\n" : "\n";
+export function ensureTemplateComponents(input: string, markerProperty: string): TemplateCheck {
+	const bom = input.startsWith("﻿") ? "﻿" : "";
+	const text = input.slice(bom.length);
 	const added: ("marker" | "embed")[] = [];
 	const fm = findFrontmatter(text);
 	const originalBody = fm ? text.slice(fm.bodyStart) : text;
+	const eol = lineEnding(text);
 
 	let result = text;
 	if (fm === null) {
@@ -94,12 +96,17 @@ export function ensureTemplateComponents(text: string, markerProperty: string): 
 	}
 
 	if (!hasEmbed(originalBody)) {
-		if (originalBody !== "" && !result.endsWith(eol + eol)) {
-			result += result.endsWith(eol) ? eol : eol + eol;
-		}
+		if (result !== "" && !result.endsWith("\n")) result += eol;
+		if (originalBody !== "" && !/\n\r?\n$/.test(result)) result += eol;
 		result += EMBED_LINE + eol;
 		added.push("embed");
 	}
 
-	return { text: added.length === 0 ? text : result, added };
+	return { text: added.length === 0 ? input : bom + result, added };
+}
+
+/** The first line ending in the text. With frontmatter, that is the opening fence's. */
+function lineEnding(text: string): string {
+	const firstEnd = text.indexOf("\n");
+	return firstEnd > 0 && text[firstEnd - 1] === "\r" ? "\r\n" : "\n";
 }
