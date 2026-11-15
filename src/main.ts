@@ -2,12 +2,18 @@ import { Notice, Plugin, TFile } from 'obsidian';
 import { mergeSettings, type PdfWrapperSettings } from "./core/settings-data.ts";
 import { PdfWrapperSettingTab } from "./settings.ts";
 import { wrapPdf } from "./pdf-wrapper.ts";
+import { LocalIntent } from "./obsidian/local-intent.ts";
+import { registerSpike } from "./spike/spike.ts";
 
 export default class PdfWrapperPlugin extends Plugin {
 	settings!: PdfWrapperSettings;
 
 	async onload() {
 		await this.loadSettings();
+
+		const localIntent = new LocalIntent(this.app);
+		this.register(localIntent.install());
+		registerSpike(this, localIntent);
 
 		this.registerEvent(
 			this.app.workspace.on('file-menu', (menu, file) => {
