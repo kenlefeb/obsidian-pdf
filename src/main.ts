@@ -2,7 +2,7 @@ import { Notice, Plugin, TFile } from 'obsidian';
 import { mergeSettings, type PdfWrapperSettings } from "./core/settings-data.ts";
 import { PdfWrapperSettingTab } from "./settings.ts";
 import { existingSiblingNote, wrapPdf, WrapMessage } from "./pdf-wrapper.ts";
-import { isPdf } from "./core/paths.ts";
+import { isNote, isPdf } from "./core/paths.ts";
 import { LocalIntent } from "./obsidian/local-intent.ts";
 import { OwnChanges } from "./core/marks.ts";
 import { Executor } from "./obsidian/execute.ts";
@@ -11,6 +11,7 @@ import { AttentionStore, attachmentFolder, scanAtStartup } from "./obsidian/atte
 import { AutoWrapper, isAutoWrapOn } from "./obsidian/auto-wrap.ts";
 import { AttentionModal } from "./ui/attention-modal.ts";
 import { attentionNotice } from "./core/attention.ts";
+import { duplicateWrapped, healthyPdf } from "./obsidian/duplicate.ts";
 import { registerSpike } from "./spike/spike.ts";
 
 export default class PdfWrapperPlugin extends Plugin {
@@ -81,8 +82,26 @@ export default class PdfWrapperPlugin extends Plugin {
 			},
 		});
 
+		this.addCommand({
+			id: 'duplicate-wrapped-document',
+			name: 'Duplicate wrapped document',
+			checkCallback: (checking) => {
+				const file = this.app.workspace.getActiveFile();
+				if (!file || !isNote(file.path) || !healthyPdf(this.app, this.settings, file)) return false;
+				if (!checking) void duplicateWrapped(this.app, executor, this.settings, file);
+				return true;
+			},
+		});
+
 		this.registerEvent(
 			this.app.workspace.on('file-menu', (menu, file) => {
+				if (file instanceof TFile && isNote(file.path) && healthyPdf(this.app, this.settings, file)) {
+					menu.addItem((item) => {
+						item.setTitle('Duplicate wrapped document')
+							.setIcon('copy')
+							.onClick(() => void duplicateWrapped(this.app, executor, this.settings, file));
+					});
+				}
 				if (file instanceof TFile && isPdf(file.path)) {
 					menu.addItem((item) => {
 						item.setTitle('Wrap PDF')

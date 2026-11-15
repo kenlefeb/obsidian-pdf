@@ -135,3 +135,13 @@ None of this has been run in Obsidian yet.
 - [ ] The toggle state differs per device: turn it on here, check another device still has it off.
 - [ ] A PDF added while Obsidian was closed appears as "Unwrapped" in the list with "Wrap all", and is not wrapped on its own at startup.
 - [ ] Toggle off: no "Unwrapped" entries are listed, and the list refreshes straight away when the switch is flipped.
+
+## Duplicate
+
+"Duplicate wrapped document" (file menu on a note, and the command palette). None of this has been run in Obsidian yet.
+
+- [ ] Duplicate a wrapped document `S`: `S 1.md` and `S 1.pdf` appear beside it and `S 1.md` opens. The copy's marker and embed point at `S 1.pdf`, the original note and PDF are unchanged, nothing lands in Needs attention, and with automatic wrapping on the copied PDF is not wrapped a second time.
+- [ ] Duplicate `S` again: `S 2.md` and `S 2.pdf` appear (the first copy is `S 1`).
+- [ ] With `S 1.md` present but no `S 1.pdf`, duplicate `S`: both copies are named `S 2`.
+- [ ] The menu item and command are absent for a note without the marker, with a missing PDF, or with a PDF elsewhere or under another name (the command is not listed in the palette; the file menu has no item).
+- [ ] Trigger the command twice quickly: only one copy pair is made.
