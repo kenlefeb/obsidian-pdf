@@ -1,7 +1,7 @@
 import { Notice, Plugin, TFile } from 'obsidian';
 import { mergeSettings, type PdfWrapperSettings } from "./core/settings-data.ts";
 import { PdfWrapperSettingTab } from "./settings.ts";
-import { existingSiblingNote, wrapPdf, WrapRefusal } from "./pdf-wrapper.ts";
+import { existingSiblingNote, wrapPdf, WrapMessage } from "./pdf-wrapper.ts";
 import { isPdf } from "./core/paths.ts";
 import { LocalIntent } from "./obsidian/local-intent.ts";
 import { registerSpike } from "./spike/spike.ts";
@@ -48,7 +48,7 @@ export default class PdfWrapperPlugin extends Plugin {
 			await wrapPdf(this.app, this.settings, () => this.saveSettings(), pdfFile, { open: true });
 			new Notice(`Wrapped ${pdfFile.basename}`);
 		} catch (e) {
-			if (e instanceof WrapRefusal) {
+			if (e instanceof WrapMessage) {
 				new Notice(e.message);
 				return;
 			}

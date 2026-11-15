@@ -8,13 +8,29 @@ import {
 	ensureTemplateComponents,
 	templatePathWithExtension,
 } from "./core/template.ts";
-import { writeClaim } from "./obsidian/snapshot.ts";
+import { EmbedUpdateError, writeClaim } from "./obsidian/snapshot.ts";
 
-/** A wrap that was refused before anything was changed. Its message is complete and shown as it is. */
-export class WrapRefusal extends Error {
+/** A wrap outcome whose message is complete and is shown as it is, without a "Failed to wrap" prefix. */
+export class WrapMessage extends Error {
+	constructor(message: string) {
+		super(message);
+		this.name = "WrapMessage";
+	}
+}
+
+/** A wrap that was refused before a note was created. (The template may have been created or repaired.) */
+export class WrapRefusal extends WrapMessage {
 	constructor(message: string) {
 		super(message);
 		this.name = "WrapRefusal";
+	}
+}
+
+/** The note was created and carries the claim, so the PDF is wrapped, but a later step failed. */
+export class WrapIncomplete extends WrapMessage {
+	constructor(message: string, readonly note: TFile) {
+		super(message);
+		this.name = "WrapIncomplete";
 	}
 }
 
@@ -39,8 +55,8 @@ export function existingSiblingNote(app: App, pdf: TFile): string | null {
 
 /**
  * Creates `<name>.md` beside the PDF from the template and marks it with the claim.
- * The PDF is not moved. Throws a WrapRefusal when it refuses before changing anything, and an Error
- * with a user-facing message, describing what was left behind, on any other failure.
+ * The PDF is not moved. Throws a WrapRefusal when it refuses before creating a note, a WrapIncomplete
+ * when the PDF is wrapped but a later step failed, and an Error describing what was left behind otherwise.
  */
 export async function wrapPdf(
 	app: App,
@@ -92,7 +108,7 @@ async function wrapOnce(
 	} catch (e) {
 		// Templater may have created the file before failing.
 		const left = app.vault.getAbstractFileByPath(notePath);
-		if (left instanceof TFile) throw notMarked(left.path, pdfFile, e);
+		if (left instanceof TFile) throw notMarked(left.path, pdfFile, settings.markerProperty, e);
 		throw new Error(`Could not create ${notePath}: ${reason(e)}.`);
 	}
 
@@ -103,23 +119,27 @@ async function wrapOnce(
 		}
 		await writeClaim(app, note, settings.markerProperty, pdfFile.path, [pdfFile.name, pdfFile.basename]);
 	} catch (e) {
-		throw notMarked(note.path, pdfFile, e);
+		if (e instanceof EmbedUpdateError) {
+			throw new WrapIncomplete(`Created and marked ${note.path}, but could not update its PDF embed: ${reason(e)}.`, note);
+		}
+		throw notMarked(note.path, pdfFile, settings.markerProperty, e);
 	}
 
 	if (options.open) {
 		try {
 			await app.workspace.getLeaf().openFile(note);
 		} catch (e) {
-			throw new Error(`Wrapped ${pdfFile.name} as ${note.path}, but could not open the note: ${reason(e)}.`);
+			throw new WrapIncomplete(`Wrapped ${pdfFile.name} as ${note.path}, but could not open the note: ${reason(e)}.`, note);
 		}
 	}
 	return note;
 }
 
 /** The note exists but carries no claim. It is not deleted: the message tells the user what to do. */
-function notMarked(notePath: string, pdfFile: TFile, e: unknown): Error {
+function notMarked(notePath: string, pdfFile: TFile, markerProperty: string, e: unknown): Error {
 	return new Error(
-		`Created ${notePath} but could not mark it as wrapping ${pdfFile.name}: ${reason(e)}. Fix or delete the note, then wrap again.`,
+		`Created ${notePath} but could not mark it as wrapping ${pdfFile.name}: ${reason(e)}. ` +
+		`Delete the note and wrap again, or add the "${markerProperty}" property to it by hand.`,
 	);
 }
 
@@ -299,6 +319,14 @@ async function createNoteFromTemplate(
 			const found = app.vault.getAbstractFileByPath(expectedPath);
 			if (found instanceof TFile) return found;
 		} catch (e) {
+			// Templater may have written the note before failing; use it rather than fail on "already exists".
+			const left = app.vault.getAbstractFileByPath(normalizePath(
+				folder.isRoot() ? `${filename}.md` : `${folder.path}/${filename}.md`
+			));
+			if (left instanceof TFile) {
+				console.warn("PDF Wrapper: Templater failed after creating the note; using the note it created", e);
+				return left;
+			}
 			console.warn("Wrap PDF: Templater failed, falling back to manual creation", e);
 		}
 	}
