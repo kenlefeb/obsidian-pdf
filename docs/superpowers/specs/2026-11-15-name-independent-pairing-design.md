@@ -89,7 +89,18 @@ the PDF.
 own PDF with a literal `![[…]]`. It works as a pair but still has the problem
 this change removes, until converted.
 
-**Unwrapped PDF**, and **"Its note was deleted; the PDF was kept"**: unchanged.
+**Unwrapped PDF.** A PDF with no marked note of its name beside it, and which
+no old-format note's marker link points to. An old-format link still protects
+its PDF until the note is converted: that PDF is not listed as Not wrapped, not
+offered to other notes, and not wrapped automatically. *(call)*
+
+**"Its note was deleted; the PDF was kept"**: unchanged.
+
+**Templates are not documents.** The configured template file, and every note
+inside the Templater template folder or the core Templates folder, is ignored
+by pairing: never a marked note, never listed. (The new default template
+carries `wrapped-pdf: true` and would otherwise be listed as "PDF not found"
+at every launch.) *(call)*
 
 ## Behaviour changes
 
@@ -153,21 +164,28 @@ A scan still never changes files.
 | Entry | Fixes offered |
 |---|---|
 | PDF not found | **Use a PDF**: pick from unwrapped PDFs (same folder first, then same name elsewhere); it is moved and renamed to the note's name. **Rename note to match**: for an unwrapped PDF in the same folder, the note takes the PDF's name instead. **Copy another document's PDF**: pick a wrapped document; its PDF is copied under this note's name. **Remove the marker.** |
-| Old format | **Convert**: marker becomes `true`; literal embeds of its PDF become the block. If its PDF is elsewhere or differently named, the entry then shows as PDF not found. |
+| Old format | **Convert**: if the marker's link points to a PDF that is not beside the note under its name, that PDF is first moved and renamed there (refused, with a notice, if the name is taken or another note's marker points to the same PDF); then the marker becomes `true` and literal embeds of the PDF become the block. If the linked PDF does not exist, the note is converted and then shows as PDF not found. *(call)* |
 | Its note was deleted; the PDF was kept | Unchanged. |
 | Not wrapped | Unchanged. |
 
-"Fix all" becomes "Convert all" for Old format entries *(call)*. There is no
-bulk fix for PDF not found: every such entry needs a choice.
+"Fix all" becomes "Convert all" *(call)*. It covers only Old format entries
+whose PDF is already beside the note under its name, so the bulk action never
+moves a file. There is no bulk fix for PDF not found: every such entry needs a
+choice.
 
 ### Automatic wrapping
 
 Unchanged, with one added guard *(call)*: a PDF that arrives from outside is
-**not** wrapped automatically while the same folder holds a marked note whose
-PDF is not found. That is what a pair looks like on a second device while its
-rename is still arriving (PDF first, note later); wrapping it would create the
-very duplicate note this change exists to prevent. The PDF stays listed as
-Not wrapped, and the list sorts itself out when the note's rename lands.
+**not** wrapped automatically while there is a marked note whose PDF is not
+found and which is either in the same folder as the arriving PDF (a rename in
+transit) or has the same base name anywhere in the vault (a move in transit).
+That is what a pair looks like on a second device while its rename or move is
+still arriving, PDF first and note later; wrapping it would create the very
+duplicate note this change exists to prevent.
+
+A PDF held back by the guard is not retried automatically. It stays listed as
+Not wrapped; if the note then arrives the pair is simply healthy, and if it
+was a false alarm the owner wraps it from the list.
 
 ### Explorer hiding, settings
 
