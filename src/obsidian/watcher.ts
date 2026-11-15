@@ -5,6 +5,7 @@ import { react } from "../core/react.ts";
 import type { PdfWrapperSettings } from "../core/settings-data.ts";
 import type { OwnChanges } from "../core/marks.ts";
 import { withoutPath } from "../core/snapshot.ts";
+import { waitAtMost, type CappedWait } from "../core/wait.ts";
 import type { VaultEvent } from "../core/types.ts";
 import type { Executor } from "./execute.ts";
 import type { LocalIntent } from "./local-intent.ts";
@@ -12,6 +13,13 @@ import { gatherSnapshot } from "./snapshot.ts";
 
 /** How long after the last change that needs it the pairs are re-examined. Provisional: spike 2 has no data yet. */
 export const SETTLE_MS = 2000;
+
+/**
+ * The longest the Watcher waits for the user's own operation to finish before reacting anyway. A wrapped call
+ * may never settle (for example a rename waiting on Obsidian's "Update links?" dialog); without a cap every
+ * later event would queue behind it. The Executor's execution-time checks remain the safety net.
+ */
+export const IDLE_WAIT_MS = 10000;
 
 export interface WatcherDeps {
 	localIntent: LocalIntent;
@@ -32,12 +40,18 @@ export class Watcher {
 	private queue: Promise<void> = Promise.resolve();
 	private recheckTimer: number | null = null;
 	private readonly pendingRemoved = new Set<string>();
-	/** Set when the plugin unloads: nothing is renamed, trashed or rechecked after that. */
+	/**
+	 * Set when the plugin unloads: no new event is handled and no recheck is scheduled after that. An Executor run
+	 * already in progress finishes its remaining actions, because finishing a half-done pair move (partner renamed,
+	 * claim not yet updated) is safer than stopping midway.
+	 */
 	private unloaded = false;
+	private idleWait: CappedWait | null = null;
 
 	constructor(private readonly plugin: Plugin, private readonly deps: WatcherDeps) {
 		plugin.register(() => {
 			this.unloaded = true;
+			this.idleWait?.cancel();
 			this.cancelRecheck();
 		});
 	}
@@ -111,7 +125,7 @@ export class Watcher {
 		try {
 			// Let the user's own operation finish first (Obsidian rewrites links after Vault.rename returns).
 			// This cannot wait on itself: events run one at a time, so no Executor call is in flight here.
-			await this.deps.localIntent.whenIdle();
+			await this.waitForIdle();
 			if (this.unloaded) return;
 			let snapshot = gatherSnapshot(this.plugin.app, this.deps.getSettings().markerProperty);
 			if (event.kind === "delete") snapshot = withoutPath(snapshot, event.path);
@@ -132,6 +146,17 @@ export class Watcher {
 			console.error("PDF Wrapper: could not react to", event, error);
 			new Notice(`PDF Wrapper could not react to the change of ${event.path}: ${reason(error)}`);
 			this.requestRecheck(null);
+		}
+	}
+
+	/** Waits for `localIntent.whenIdle()`, at most IDLE_WAIT_MS. */
+	private async waitForIdle(): Promise<void> {
+		const wait = waitAtMost(this.deps.localIntent.whenIdle(), IDLE_WAIT_MS);
+		this.idleWait = wait;
+		const settled = await wait.done;
+		this.idleWait = null;
+		if (!settled && !this.unloaded) {
+			console.warn(`PDF Wrapper: an Obsidian file operation was still running after ${IDLE_WAIT_MS} ms; reacting anyway.`);
 		}
 	}
 

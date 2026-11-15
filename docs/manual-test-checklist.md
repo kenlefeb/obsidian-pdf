@@ -78,7 +78,7 @@ note" on (the defaults), on desktop and on a phone. Open the developer console (
 The plugin's event handling was built without a running Obsidian. Each line is a behaviour the code assumes;
 report any that does not hold.
 
-- [ ] The plugin's wrapper is in place: with the plugin enabled, paste `app.fileManager.renameFile.toString()` into the developer console. It should print a short wrapper function (calling `next.call(...)`), not Obsidian's own long implementation. Also `Object.prototype.hasOwnProperty.call(app.fileManager, "renameFile")` should print `true`. If either is not so, Obsidian's UI may not go through the wrapped method, and the plugin may react before Obsidian has finished updating links.
+- [ ] The plugin's wrapper is in place: with the plugin enabled, paste `app.fileManager.renameFile.toString()` into the developer console. It should print monkey-around's short wrapper function, containing `current.apply(this, args)`, not Obsidian's own long implementation of the rename. Also `Object.prototype.hasOwnProperty.call(app.fileManager, "renameFile")` should print `true`. If either is not so, Obsidian's UI may not go through the wrapped method, and the plugin may react before Obsidian has finished updating links.
 - [ ] Obsidian's own rename from the explorer and from a tab's title goes through `app.fileManager.renameFile` (the plugin waits for that call to finish before following, so links are rewritten first).
 - [ ] A rename or move in the explorer fires `vault` `rename` with the new file and the old path, and goes through `Vault.rename` (so it is recognised as local). Check with the spike log: `local` is `true` for in-app renames, moves and deletes, and `false` for Finder changes.
 - [ ] When `vault` `rename` fires for a note, `metadataCache` already has that note's frontmatter under the new path (a followed rename works on the first try, not only after a recheck).
@@ -92,6 +92,9 @@ report any that does not hold.
 - [ ] Deleting a folder: by the time the plugin handles the note's deletion, the PDF is already gone from Obsidian's file list (no "Could not delete" notice).
 - [ ] The plugin's own rename of a partner fires `vault` `rename` within 5 seconds, so it is recognised as the plugin's own and not followed back.
 - [ ] Obsidian Sync and iCloud apply remote renames and deletes without going through `Vault.rename`, `Vault.trash` or `Vault.delete` (otherwise a receiving device would act on them; the two settings above are the remedy).
+- [ ] `vault.create` fires its `create` event before its promise resolves (the plugin's mark on a new note is released once the wrap finishes). Check: wrap a PDF and confirm nothing odd happens to the new note: it is not renamed, moved or reacted to a second time, and it is not listed as needing attention.
+- [ ] With Settings → Files and links → "Automatically update internal links" off, rename a wrapped PDF in Obsidian: answer the "Update links?" dialog, then confirm the note follows and its content is intact. Repeat, leaving the dialog open for more than ten seconds before answering, and record what happens (the plugin stops waiting after ten seconds, logs a "PDF Wrapper:" warning in the console, and reacts anyway).
+- [ ] With Templater, wrap a PDF with a template that moves its own note (`tp.file.move`): afterwards the pair is intact (note beside the PDF, marker canonical) and nothing was renamed a second time.
 
 ## Needs attention
 
