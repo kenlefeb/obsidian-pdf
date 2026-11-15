@@ -1,7 +1,7 @@
 # Paired PDF documents — design
 
 Date: 2026-11-15
-Status: approved by owner 2026-11-15 (revision 5: following in-app changes is a setting; spike 2 no longer gates the build)
+Status: approved by owner 2026-11-15 (revision 6: an in-app copy of a wrapped note copies its PDF too)
 
 ## Intent
 
@@ -292,7 +292,8 @@ Details, all *(call)*:
 | Delete the note of a broken pair | Nothing. The plugin only acts on PDFs it can see are paired. *(call)* |
 | Delete the PDF of a pair | Leave the note. It is now Missing and is listed. *(call)* |
 | Duplicate wrapped document (new command) | Copy both files using Obsidian's naming for copies (`Statement 1.md`, `Statement 1.pdf`) and write the new claim. |
-| Copy only the note by other means | The copy is an Extra claim and is listed, with a "copy the PDF for this note" fix. The original is unaffected. |
+| Copy the note with Obsidian's own copy action ("Make a copy" / "Duplicate" in the file menu), or any other in-app copy | Copy the PDF too, under the copy's name, and point the copy's marker and embed at it (owner's decision, revision 6: the user expects the whole document to be duplicated). If the PDF's new name is taken, nothing is overwritten: a notice says so and the copy is listed as an Extra claim. The original is unaffected. |
+| A copy of the note that arrives from outside (Finder, sync) | Not acted on. The copy is an Extra claim and is listed, with a "copy the PDF for this note" fix. |
 | Partner cannot follow (destination name taken) | The user's action stands. Show a notice; the pair is now broken and is listed. *(call)* |
 
 ### Everything else
