@@ -4,11 +4,13 @@ import { pairUp } from "../../src/core/pairing.ts";
 import {
 	autoWrapChecker,
 	buildList,
+	bulkWrapChecker,
 	copyCandidates,
 	describeConvert,
 	isBulkConvertible,
 	isBulkWrappable,
 	isCurrentItem,
+	noteBesidePdf,
 	pdfCandidates,
 	planRepair,
 	renameCandidates,
@@ -25,6 +27,10 @@ const notFound = (notePath: string): ListItem => ({ kind: "pdf-not-found", noteP
 const unwrapped = (pdfPath: string): ListItem => ({ kind: "unwrapped", notePath: null, pdfPath });
 const removed = (pdfPath: string): ListItem => ({ kind: "note-removed", notePath: null, pdfPath });
 /** The list entry for `notePath`, as buildList gives it for this snapshot. */
+const notice = (message: string) => [{ type: "notice", message }];
+const gone = (pdf: string) => notice(`${pdf} is no longer available. Pick again.`);
+const NOT_CHOSEN = notice("No PDF was chosen.");
+const NOT_OFFERED = notice("That cannot be done for this entry. Check the list again.");
 const listed = (s: VaultSnapshot, notePath: string): ListItem => {
 	const item = buildList(pairUp(s), [], null).find((entry) => entry.notePath === notePath);
 	if (item === undefined) throw new Error(`${notePath} is not listed`);
@@ -150,14 +156,15 @@ test("use-pdf into the vault root joins without a leading slash", () => {
 });
 test("use-pdf is refused for a PDF that is not a candidate, or without a chosen PDF", () => {
 	const s = snap([m("a/N.md"), m("b/W.md")], ["b/W.pdf", "z/Other.pdf", "a/Scan.pdf"]);
-	expect(planRepair(notFound("a/N.md"), "use-pdf", s, "b/W.pdf")).toEqual([]);     // another document's PDF
-	expect(planRepair(notFound("a/N.md"), "use-pdf", s, "z/Other.pdf")).toEqual([]); // elsewhere under another name
-	expect(planRepair(notFound("a/N.md"), "use-pdf", s, "gone.pdf")).toEqual([]);
-	expect(planRepair(notFound("a/N.md"), "use-pdf", s)).toEqual([]);
+	expect(planRepair(notFound("a/N.md"), "use-pdf", s, "b/W.pdf")).toEqual(gone("b/W.pdf"));         // another document's PDF
+	expect(planRepair(notFound("a/N.md"), "use-pdf", s, "z/Other.pdf")).toEqual(gone("z/Other.pdf")); // elsewhere under another name
+	expect(planRepair(notFound("a/N.md"), "use-pdf", s, "gone.pdf")).toEqual(gone("gone.pdf"));
+	expect(planRepair(notFound("a/N.md"), "use-pdf", s)).toEqual(NOT_CHOSEN);
 });
 test("use-pdf is refused when the destination is taken, even by a name that differs only by letter case", () => {
 	const s: VaultSnapshot = { notePaths: ["a/N.md", "a/n.PDF"], pdfPaths: ["x/N.pdf"], marked: [m("a/N.md")] };
-	expect(planRepair(notFound("a/N.md"), "use-pdf", s, "x/N.pdf")).toEqual([]);
+	expect(planRepair(notFound("a/N.md"), "use-pdf", s, "x/N.pdf")).toEqual(
+		notice("Could not move x/N.pdf to a/N.pdf: a file with that name already exists."));
 });
 test("use-pdf may rename a PDF that differs from its destination only by letter case", () => {
 	const s = snap([m("a/N.md")], ["a/n.pdf"]);
@@ -176,13 +183,14 @@ test("rename-note-to-pdf keeps the note's own spelling of its extension", () => 
 });
 test("rename-note-to-pdf is refused for a PDF in another folder, a wrapped PDF, or no chosen PDF", () => {
 	const s = snap([m("a/N.md"), m("a/W.md")], ["z/N.pdf", "a/W.pdf", "a/Scan.pdf"]);
-	expect(planRepair(notFound("a/N.md"), "rename-note-to-pdf", s, "z/N.pdf")).toEqual([]);
-	expect(planRepair(notFound("a/N.md"), "rename-note-to-pdf", s, "a/W.pdf")).toEqual([]);
-	expect(planRepair(notFound("a/N.md"), "rename-note-to-pdf", s)).toEqual([]);
+	expect(planRepair(notFound("a/N.md"), "rename-note-to-pdf", s, "z/N.pdf")).toEqual(gone("z/N.pdf"));
+	expect(planRepair(notFound("a/N.md"), "rename-note-to-pdf", s, "a/W.pdf")).toEqual(gone("a/W.pdf"));
+	expect(planRepair(notFound("a/N.md"), "rename-note-to-pdf", s)).toEqual(NOT_CHOSEN);
 });
 test("rename-note-to-pdf is refused when a note of that name exists, ignoring letter case", () => {
 	const s = snap([m("a/N.md")], ["a/Scan.pdf"], ["a/scan.md"]);
-	expect(planRepair(notFound("a/N.md"), "rename-note-to-pdf", s, "a/Scan.pdf")).toEqual([]);
+	expect(planRepair(notFound("a/N.md"), "rename-note-to-pdf", s, "a/Scan.pdf")).toEqual(
+		notice("Could not rename a/N.md to a/Scan.md: a file with that name already exists."));
 });
 
 // planRepair: copy-pdf
@@ -193,13 +201,14 @@ test("copy-pdf copies a wrapped document's PDF under the note's name, with a low
 });
 test("copy-pdf is refused for a PDF that is not a wrapped document's, or without a chosen PDF", () => {
 	const s = snap([m("a/N.md"), m("b/W.md")], ["b/W.pdf", "a/Scan.pdf"]);
-	expect(planRepair(notFound("a/N.md"), "copy-pdf", s, "a/Scan.pdf")).toEqual([]);
-	expect(planRepair(notFound("a/N.md"), "copy-pdf", s, "gone.pdf")).toEqual([]);
-	expect(planRepair(notFound("a/N.md"), "copy-pdf", s)).toEqual([]);
+	expect(planRepair(notFound("a/N.md"), "copy-pdf", s, "a/Scan.pdf")).toEqual(gone("a/Scan.pdf"));
+	expect(planRepair(notFound("a/N.md"), "copy-pdf", s, "gone.pdf")).toEqual(gone("gone.pdf"));
+	expect(planRepair(notFound("a/N.md"), "copy-pdf", s)).toEqual(NOT_CHOSEN);
 });
 test("copy-pdf is refused when the destination is taken, ignoring letter case", () => {
 	const s: VaultSnapshot = { notePaths: ["a/N.md", "b/W.md", "a/n.PDF"], pdfPaths: ["b/W.pdf"], marked: [m("a/N.md"), m("b/W.md")] };
-	expect(planRepair(notFound("a/N.md"), "copy-pdf", s, "b/W.pdf")).toEqual([]);
+	expect(planRepair(notFound("a/N.md"), "copy-pdf", s, "b/W.pdf")).toEqual(
+		notice("Could not copy b/W.pdf to a/N.pdf: a file with that name already exists."));
 });
 
 // planRepair: remove-marker, wrap, delete-pdf, keep-plain
@@ -218,11 +227,17 @@ test("wrap, for a removed note and for an unwrapped PDF", () => {
 	expect(planRepair(removed("a/S.pdf"), "wrap", s)).toEqual([{ type: "wrap", pdfPath: "a/S.pdf" }]);
 	expect(planRepair(unwrapped("a/S.pdf"), "wrap", s)).toEqual([{ type: "wrap", pdfPath: "a/S.pdf" }]);
 });
-test("a repair the entry does not offer does nothing", () => {
-	const s = snap([m("a/N.md")], ["b/S.pdf"]);
-	expect(planRepair(unwrapped("b/S.pdf"), "delete-pdf", s)).toEqual([]);
-	expect(planRepair(notFound("a/N.md"), "convert", s)).toEqual([]);
-	expect(planRepair(notFound("a/N.md"), "wrap", s)).toEqual([]);
+test("a repair that a current entry does not offer is refused with one notice", () => {
+	const s = snap([m("a/N.md"), m("a/L.md", { ownTargets: ["L.pdf"] })], ["b/S.pdf", "a/L.pdf"]);
+	expect(planRepair(unwrapped("b/S.pdf"), "delete-pdf", s)).toEqual(NOT_OFFERED);
+	expect(planRepair(unwrapped("b/S.pdf"), "keep-plain", s)).toEqual(NOT_OFFERED);
+	expect(planRepair(unwrapped("b/S.pdf"), "remove-marker", s)).toEqual(NOT_OFFERED);
+	expect(planRepair(unwrapped("b/S.pdf"), "use-pdf", s, "b/S.pdf")).toEqual(NOT_OFFERED);
+	expect(planRepair(unwrapped("b/S.pdf"), "copy-pdf", s, "a/L.pdf")).toEqual(NOT_OFFERED);
+	expect(planRepair(notFound("a/N.md"), "convert", s)).toEqual(NOT_OFFERED);
+	expect(planRepair(notFound("a/N.md"), "wrap", s)).toEqual(NOT_OFFERED);
+	expect(planRepair(listed(s, "a/L.md"), "remove-marker", s)).toEqual(NOT_OFFERED);
+	expect(planRepair(listed(s, "a/L.md"), "rename-note-to-pdf", s, "b/S.pdf")).toEqual(NOT_OFFERED);
 });
 
 // planRepair: convert
@@ -246,17 +261,17 @@ test("convert keeps the moved PDF's own spelling of its extension", () => {
 	const s = snap([m("a/S.md", { markerLink: "x/Old.PDF", linkedPdf: "x/Old.PDF", ownTargets: ["x/Old.PDF"] })], ["x/Old.PDF"]);
 	expect(planRepair(listed(s, "a/S.md"), "convert", s)[0]).toEqual({ type: "rename", from: "x/Old.PDF", to: "a/S.PDF" });
 });
+test("convert of a note that has its PDF beside it never moves or refuses, even when its marker points to another PDF", () => {
+	const linked = { markerLink: "x/Old.pdf", linkedPdf: "x/Old.pdf", ownTargets: ["x/Old.pdf", "S.pdf"] };
+	const s = snap([m("a/S.md", linked), m("b/T.md", linked)], ["x/Old.pdf", "a/S.pdf"]);
+	expect(planRepair(listed(s, "a/S.md"), "convert", s)).toEqual([{ type: "convert", notePath: "a/S.md", ownTargets: ["x/Old.pdf", "S.pdf"] }]);
+});
 test("convert is refused with one notice when the linked PDF's destination is taken", () => {
 	const linked = { markerLink: "x/Old.pdf", linkedPdf: "x/Old.pdf", ownTargets: ["x/Old.pdf"] };
-	// Another PDF is already beside the note under its name.
-	const beside = snap([m("a/S.md", linked)], ["x/Old.pdf", "a/S.pdf"]);
-	const refusedBeside = planRepair(listed(beside, "a/S.md"), "convert", beside);
-	expect(refusedBeside).toEqual([{ type: "notice", message: "Could not convert S.md: its marker points to x/Old.pdf, but a file named S.pdf already exists beside the note." }]);
-	// A file whose name differs only by letter case is in the way.
-	const other: VaultSnapshot = { notePaths: ["a/S.md", "a/s.PDF"], pdfPaths: ["x/Old.pdf"], marked: [m("a/S.md", linked)] };
-	const refusedOther = planRepair(listed(other, "a/S.md"), "convert", other);
-	expect(refusedOther).toHaveLength(1);
-	expect(refusedOther[0]?.type).toBe("notice");
+	// No PDF is beside the note, but a file whose name differs only by letter case is in the way.
+	const s: VaultSnapshot = { notePaths: ["a/S.md", "a/s.PDF"], pdfPaths: ["x/Old.pdf"], marked: [m("a/S.md", linked)] };
+	expect(planRepair(listed(s, "a/S.md"), "convert", s)).toEqual(
+		notice("Could not convert S.md: its marker points to x/Old.pdf, but a file named S.pdf already exists beside the note."));
 });
 test("convert is refused with one notice when another marked note's marker points to the same PDF", () => {
 	const linked = { markerLink: "x/Old.pdf", linkedPdf: "x/Old.pdf", ownTargets: ["x/Old.pdf"] };
@@ -342,9 +357,11 @@ test("describeConvert says first that a linked PDF elsewhere is moved and rename
 	const s = snap([m("a/S.md", { markerLink: "x/Old.PDF", linkedPdf: "x/Old.PDF", ownTargets: ["x/Old.PDF"] })], ["x/Old.PDF"]);
 	expect(describeConvert(listed(s, "a/S.md"), pairUp(s))).toMatch(/^x\/Old\.PDF is moved to a\/S\.PDF\. Convert S\.md: /);
 });
-test("describeConvert promises no move when a PDF is already beside the note", () => {
+test("describeConvert says that another PDF the marker points to stays where it is", () => {
 	const s = snap([m("a/S.md", { markerLink: "x/Old.pdf", linkedPdf: "x/Old.pdf", ownTargets: ["x/Old.pdf"] })], ["x/Old.pdf", "a/S.pdf"]);
-	expect(describeConvert(listed(s, "a/S.md"), pairUp(s))).toMatch(/^Convert S\.md: .* plain text\.$/);
+	const text = describeConvert(listed(s, "a/S.md"), pairUp(s));
+	expect(text).toMatch(/^Convert S\.md: /);
+	expect(text).toMatch(/ S\.pdf beside the note is its PDF; x\/Old\.pdf, which the marker points to, stays where it is and is not wrapped\.$/);
 });
 test("describeConvert says when the note will then have no PDF", () => {
 	const s = snap([m("a/S.md", { markerLink: "Gone.pdf" })], []);
@@ -353,7 +370,7 @@ test("describeConvert says when the note will then have no PDF", () => {
 test("describeConvert is empty for an entry that is not listed in the pairing", () => {
 	expect(describeConvert(notFound("a/N.md"), pairUp(snap([], [])))).toBe("");
 });
-test("isBulkConvertible is true only when the PDF is already beside the note under its name", () => {
+test("isBulkConvertible is true for every links-own-pdf entry whose PDF is beside the note", () => {
 	const linked = { markerLink: "x/Old.pdf", linkedPdf: "x/Old.pdf", ownTargets: ["x/Old.pdf"] };
 	const s = snap([
 		m("a/S.md", { markerLink: "S.pdf", linkedPdf: "a/S.pdf", ownTargets: ["S.pdf"] }),
@@ -366,7 +383,7 @@ test("isBulkConvertible is true only when the PDF is already beside the note und
 	expect(isBulkConvertible(listed(s, "a/S.md"), p)).toBe(true);
 	expect(isBulkConvertible(listed(s, "a/Body.md"), p)).toBe(true);
 	expect(isBulkConvertible(listed(s, "a/Moved.md"), p)).toBe(false); // the PDF is elsewhere
-	expect(isBulkConvertible(listed(s, "a/Both.md"), p)).toBe(false);  // would be refused: its marker points elsewhere
+	expect(isBulkConvertible(listed(s, "a/Both.md"), p)).toBe(true);   // its marker points elsewhere, but nothing moves
 	expect(isBulkConvertible(notFound("a/N.md"), p)).toBe(false);
 	expect(isBulkConvertible(listed(s, "a/S.md"), pairUp(snap([], [])))).toBe(false);
 });
@@ -436,4 +453,44 @@ test("isBulkWrappable is false for a PDF whose name cannot be linked", () => {
 	for (const name of ["a/S [1].pdf", "a/S|x.pdf", "a/S#1.pdf", "a/S^1.pdf"]) {
 		expect([name, isBulkWrappable(unwrapped(name), snap([], [name]))]).toEqual([name, false]);
 	}
+});
+
+// bulkWrapChecker: the same test for every entry of one snapshot, indexed once
+
+test("bulkWrapChecker and isBulkWrappable give the expected answer for each entry of one snapshot", () => {
+	const s = snap([m("X.md", { markerLink: "e/Y.pdf", linkedPdf: "e/Y.pdf", ownTargets: ["e/Y.pdf"] })],
+		["a/S.pdf", "a/T.pdf", "b/V.pdf", "c/U.pdf", "d/W [1].pdf", "X.pdf", "e/Y.pdf"],
+		["a/s.MD", "b/T.md", "c/U.txt"]);
+	const cases: [ListItem, boolean][] = [
+		[unwrapped("a/S.pdf"), false],     // note beside it, other letter case
+		[unwrapped("a/T.pdf"), true],      // the note of that name is in another folder
+		[unwrapped("b/V.pdf"), true],
+		[unwrapped("c/U.pdf"), true],      // a .txt of that name is not a note
+		[unwrapped("d/W [1].pdf"), false], // name cannot be linked
+		[unwrapped("X.pdf"), false],       // X.md is beside it, at the vault root
+		[unwrapped("e/Y.pdf"), false],     // a link-valued marker points to it
+		[unwrapped("gone.pdf"), false],    // not in the vault
+		[removed("b/V.pdf"), false],       // other kinds
+		[{ kind: "unwrapped", notePath: null, pdfPath: null }, false],
+	];
+	const check = bulkWrapChecker(s, pairUp(s));
+	for (const [entry, expected] of cases) {
+		expect([entry.pdfPath, entry.kind, check(entry)]).toEqual([entry.pdfPath, entry.kind, expected]);
+		expect([entry.pdfPath, entry.kind, isBulkWrappable(entry, s)]).toEqual([entry.pdfPath, entry.kind, expected]);
+	}
+});
+test("bulkWrapChecker works without a pairing handed in", () => {
+	expect(bulkWrapChecker(snap([], ["a/S.pdf"]))(unwrapped("a/S.pdf"))).toBe(true);
+});
+
+// noteBesidePdf
+
+test("noteBesidePdf finds the note that would pair with the PDF, ignoring letter case", () => {
+	expect(noteBesidePdf("a/S.pdf", ["b/S.md", "a/S.md"])).toBe("a/S.md");
+	expect(noteBesidePdf("a/S.PDF", ["A/s.MD"])).toBe("A/s.MD");
+	expect(noteBesidePdf("S.pdf", ["S.md"])).toBe("S.md");
+});
+test("noteBesidePdf ignores notes in other folders, with other names, and non-notes", () => {
+	expect(noteBesidePdf("a/S.pdf", ["b/S.md", "a/T.md", "a/S.txt", "a/S.pdf"])).toBeNull();
+	expect(noteBesidePdf("a/S.pdf", [])).toBeNull();
 });

@@ -3,7 +3,7 @@ import { isFree, partnerDestination } from "./follow.ts";
 import { selfLinked } from "./marker.ts";
 import type { FileAction, ListItem, MarkedNote, Pair, Pairing, RepairId, VaultSnapshot } from "./model.ts";
 import { healthyPairs, pairOfNote, pairUp } from "./pairing.ts";
-import { basename, dirname, filename, isInFolder, isNote, pairKey, pdfBeside } from "./paths.ts";
+import { basename, dirname, filename, findPathIgnoringCase, isInFolder, isNote, noteBeside, pairKey, pdfBeside } from "./paths.ts";
 
 type OwnLinks = NonNullable<ListItem["links"]>;
 
@@ -135,11 +135,12 @@ function planConvert(pair: Pair, snapshot: VaultSnapshot): FileAction[] {
 	const note = pair.note;
 	const notePath = note.notePath;
 	const actions: FileAction[] = [];
-	const from = linkedPdfElsewhere(pair);
+	// A note that has its PDF beside it is converted as it is: a PDF its marker points to elsewhere stays there.
+	const from = pair.pdfPath === null ? linkedPdfElsewhere(pair) : null;
 	if (from !== null && snapshot.pdfPaths.includes(from)) {
 		const refused = (why: string): FileAction[] => [{ type: "notice", message: `Could not convert ${filename(notePath)}: ${why}` }];
 		const to = partnerDestination(notePath, from);
-		if (pair.pdfPath !== null || !isFree(to, from, snapshot)) {
+		if (!isFree(to, from, snapshot)) {
 			return refused(`its marker points to ${from}, but a file named ${filename(to)} already exists beside the note.`);
 		}
 		const other = snapshot.marked.find((m) => m.notePath !== notePath && m.linkedPdf === from);
@@ -151,42 +152,66 @@ function planConvert(pair: Pair, snapshot: VaultSnapshot): FileAction[] {
 	return actions;
 }
 
+const NOT_OFFERED: FileAction[] = [{ type: "notice", message: "That cannot be done for this entry. Check the list again." }];
+
+const told = (message: string): FileAction[] => [{ type: "notice", message }];
+
+const taken = (verb: string, from: string, to: string): FileAction[] =>
+	told(`Could not ${verb} ${from} to ${to}: a file with that name already exists.`);
+
+/** The chosen PDF when it is one of `candidates`; else the notice that refuses it. */
+function chosenFrom(candidates: string[], chosenPdf: string | undefined): string | FileAction[] {
+	if (chosenPdf === undefined) return told("No PDF was chosen.");
+	return candidates.includes(chosenPdf) ? chosenPdf : told(`${chosenPdf} is no longer available. Pick again.`);
+}
+
 /**
- * The file actions a repair performs. Nothing (an empty list) when the entry no longer describes the vault, does not
- * offer the repair, the chosen PDF is not one of its candidates, or the destination is taken (ignoring letter case):
- * nothing is ever overwritten. A rename keeps the renamed file's own spelling of its extension. Convert that cannot
- * move its PDF returns a single notice. `pairing` is `pairUp(snapshot)` when the caller already has it.
+ * The file actions a repair performs. Nothing (an empty list) when the entry no longer describes the vault. A repair
+ * refused on a current entry returns a single notice saying why: the entry does not offer it, the chosen PDF is not
+ * one of its candidates, the destination is taken (ignoring letter case; nothing is ever overwritten), or Convert
+ * cannot move its PDF. A rename keeps the renamed file's own spelling of its extension. `pairing` is
+ * `pairUp(snapshot)` when the caller already has it.
  */
 export function planRepair(item: ListItem, repair: RepairId, snapshot: VaultSnapshot, chosenPdf?: string, pairing?: Pairing): FileAction[] {
 	const p = pairing ?? pairUp(snapshot);
-	if (!isCurrentItem(item, snapshot, p) || !repairsFor(item, p).includes(repair)) return [];
+	if (!isCurrentItem(item, snapshot, p)) return [];
+	const offered = repairsFor(item, p).includes(repair);
 	switch (repair) {
 		case "keep-plain":
-			return [];
+			return offered ? [] : NOT_OFFERED;
 		case "wrap":
-			return item.pdfPath === null ? [] : [{ type: "wrap", pdfPath: item.pdfPath }];
+			return offered && item.pdfPath !== null ? [{ type: "wrap", pdfPath: item.pdfPath }] : NOT_OFFERED;
 		case "delete-pdf":
-			return item.pdfPath === null ? [] : [{ type: "delete", path: item.pdfPath }];
+			return offered && item.pdfPath !== null ? [{ type: "delete", path: item.pdfPath }] : NOT_OFFERED;
 		case "remove-marker":
-			return item.notePath === null ? [] : [{ type: "removeMarker", notePath: item.notePath }];
+			return offered && item.notePath !== null ? [{ type: "removeMarker", notePath: item.notePath }] : NOT_OFFERED;
 		case "use-pdf": {
-			if (item.notePath === null || chosenPdf === undefined || !pdfCandidates(item, p).includes(chosenPdf)) return [];
-			const to = partnerDestination(item.notePath, chosenPdf);
-			return isFree(to, chosenPdf, snapshot) ? [{ type: "rename", from: chosenPdf, to }] : [];
+			const notePath = noteWithoutPdf(item);
+			if (notePath === null) return NOT_OFFERED;
+			const from = chosenFrom(pdfCandidates(item, p), chosenPdf);
+			if (typeof from !== "string") return from;
+			const to = partnerDestination(notePath, from);
+			return isFree(to, from, snapshot) ? [{ type: "rename", from, to }] : taken("move", from, to);
 		}
 		case "rename-note-to-pdf": {
-			if (item.notePath === null || chosenPdf === undefined || !renameCandidates(item, p).includes(chosenPdf)) return [];
-			const to = partnerDestination(chosenPdf, item.notePath);
-			return isFree(to, item.notePath, snapshot) ? [{ type: "rename", from: item.notePath, to }] : [];
+			const notePath = noteWithoutPdf(item);
+			if (notePath === null) return NOT_OFFERED;
+			const pdf = chosenFrom(renameCandidates(item, p), chosenPdf);
+			if (typeof pdf !== "string") return pdf;
+			const to = partnerDestination(pdf, notePath);
+			return isFree(to, notePath, snapshot) ? [{ type: "rename", from: notePath, to }] : taken("rename", notePath, to);
 		}
 		case "copy-pdf": {
-			if (item.notePath === null || chosenPdf === undefined || !copyCandidates(item, p).includes(chosenPdf)) return [];
-			const to = pdfBeside(item.notePath);
-			return isFree(to, null, snapshot) ? [{ type: "copy", from: chosenPdf, to }] : [];
+			const notePath = noteWithoutPdf(item);
+			if (notePath === null) return NOT_OFFERED;
+			const from = chosenFrom(copyCandidates(item, p), chosenPdf);
+			if (typeof from !== "string") return from;
+			const to = pdfBeside(notePath);
+			return isFree(to, null, snapshot) ? [{ type: "copy", from, to }] : taken("copy", from, to);
 		}
 		case "convert": {
-			const pair = item.notePath === null ? null : pairOfNote(p, item.notePath);
-			return pair === null ? [] : planConvert(pair, snapshot);
+			const pair = offered && item.notePath !== null ? pairOfNote(p, item.notePath) : null;
+			return pair === null ? NOT_OFFERED : planConvert(pair, snapshot);
 		}
 	}
 }
@@ -196,27 +221,28 @@ export function describeConvert(item: ListItem, pairing: Pairing): string {
 	const pair = item.kind === "links-own-pdf" && item.notePath !== null ? pairOfNote(pairing, item.notePath) : null;
 	if (pair === null) return "";
 	const notePath = pair.note.notePath;
-	// With a PDF already beside the note there is nowhere to move a linked one: planRepair refuses with a notice.
-	const from = pair.pdfPath === null ? linkedPdfElsewhere(pair) : null;
+	// Only a note with no PDF beside it has its linked PDF moved there; otherwise that PDF stays where it is.
+	const linked = linkedPdfElsewhere(pair);
+	const from = pair.pdfPath === null ? linked : null;
 	const sentences: string[] = [];
 	if (from !== null) sentences.push(`${from} is moved to ${partnerDestination(notePath, from)}.`);
 	sentences.push(`Convert ${filename(notePath)}: the marker property is set to true, links to the PDF are removed from its other properties, `
 		+ `each embed of the PDF in the text becomes the ${BLOCK_LANGUAGE} block (a page or size set on the embed is lost), `
 		+ "and each link to it becomes plain text.");
+	if (pair.pdfPath !== null && linked !== null) {
+		sentences.push(`${filename(pair.pdfPath)} beside the note is its PDF; ${linked}, which the marker points to, stays where it is and is not wrapped.`);
+	}
 	if (pair.pdfPath === null && from === null) {
 		sentences.push(`No PDF named ${filename(pdfBeside(notePath))} is beside this note, so it will then be listed as PDF not found.`);
 	}
 	return sentences.join(" ");
 }
 
-/**
- * True when "Convert all" covers this entry: its PDF is already beside the note under its name and its marker does not
- * point to another PDF, so converting it never moves a file.
- */
+/** True when "Convert all" covers this entry: its PDF is already beside the note under its name, so converting it never moves a file. */
 export function isBulkConvertible(item: ListItem, pairing: Pairing): boolean {
 	if (item.kind !== "links-own-pdf" || item.notePath === null) return false;
 	const pair = pairOfNote(pairing, item.notePath);
-	return pair !== null && pair.pdfPath !== null && linkedPdfElsewhere(pair) === null;
+	return pair !== null && pair.pdfPath !== null;
 }
 
 /** True when a PDF should be wrapped automatically: it exists, is unwrapped, has no note of its name, and is outside the attachment folder. */
@@ -257,4 +283,27 @@ export function isBulkWrappable(item: ListItem, snapshot: VaultSnapshot, pairing
 	return isLinkSafeName(item.pdfPath)
 		&& !snapshot.notePaths.some((note) => isNote(note) && pairKey(note) === key)
 		&& isCurrentItem(item, snapshot, pairing);
+}
+
+/**
+ * `isBulkWrappable` for every entry of one snapshot: indexes the snapshot once (the unwrapped PDFs, and the lower-cased
+ * folder and base name of every note), so each check takes constant time. For counting the entries of a whole list.
+ */
+export function bulkWrapChecker(snapshot: VaultSnapshot, pairing?: Pairing): (item: ListItem) => boolean {
+	const unwrapped = new Set((pairing ?? pairUp(snapshot)).unwrappedPdfs);
+	const noteKeys = new Set(snapshot.notePaths.filter(isNote).map(pairKey));
+	return (item) => item.kind === "unwrapped"
+		&& item.pdfPath !== null
+		&& isLinkSafeName(item.pdfPath)
+		&& !noteKeys.has(pairKey(item.pdfPath))
+		&& unwrapped.has(item.pdfPath);
+}
+
+/**
+ * The note in `notePaths` that would pair with `pdfPath` (same folder, same base name, ignoring letter case as a
+ * case-insensitive file system would), or null. Meant for the vault's file list, which does not lag as the
+ * metadata cache can: "Delete the PDF" asks it before trashing anything.
+ */
+export function noteBesidePdf(pdfPath: string, notePaths: string[]): string | null {
+	return findPathIgnoringCase(notePaths.filter(isNote), noteBeside(pdfPath));
 }

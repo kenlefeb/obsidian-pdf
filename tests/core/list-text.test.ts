@@ -1,5 +1,5 @@
 import { expect, test } from "vitest";
-import { bulkResultMessage, listNotice, nextPendingRemoved, repairLabel, rowFile, stateLine } from "../../src/core/list-text.ts";
+import { bulkResultMessage, listNotice, nextPendingRemoved, noteBesidePdfMessage, repairLabel, rowFile, stateLine } from "../../src/core/list-text.ts";
 import type { ListItem, MarkedNote, RepairId, VaultSnapshot } from "../../src/core/model.ts";
 import { pairUp } from "../../src/core/pairing.ts";
 
@@ -70,4 +70,8 @@ test("bulkResultMessage reports how many were done, and says so when it stopped 
 test("listNotice says how many documents need attention", () => {
 	expect(listNotice(3)).toBe("3 documents need attention");
 	expect(listNotice(1)).toBe("1 document needs attention");
+});
+
+test("noteBesidePdfMessage names the note file", () => {
+	expect(noteBesidePdfMessage("a/b/S.md")).toBe("A note named S.md now exists beside this PDF. Check the list again.");
 });

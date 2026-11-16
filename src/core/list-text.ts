@@ -68,3 +68,8 @@ export function bulkResultMessage(kind: "convert" | "wrap", done: number, stoppe
 export function listNotice(count: number): string {
 	return count === 1 ? "1 document needs attention" : `${count} documents need attention`;
 }
+
+/** Why "Delete the PDF" was refused: a note that would pair with it exists. */
+export function noteBesidePdfMessage(notePath: string): string {
+	return `A note named ${filename(notePath)} now exists beside this PDF. Check the list again.`;
+}
