@@ -16,7 +16,6 @@ import {
 	planRepair,
 	renameCandidates,
 	repairsFor,
-	shouldAutoWrap,
 } from "../../src/core/repairs.ts";
 
 const m = (notePath: string, more: Partial<MarkedNote> = {}): MarkedNote =>
@@ -430,19 +429,20 @@ test("isBulkConvertible is true for every links-own-pdf entry whose PDF is besid
 	expect(isBulkConvertible(listed(s, "a/S.md"), pairUp(snap([], [])))).toBe(false);
 });
 
-// shouldAutoWrap, autoWrapChecker
+// autoWrapChecker
 
-test("shouldAutoWrap", () => {
+test("autoWrapChecker", () => {
 	const s = snap([m("a/S.md")], ["a/S.pdf", "a/N.pdf", "a/New.pdf", "att/x.pdf"], ["a/N.md"]);
-	expect(shouldAutoWrap("a/New.pdf", s, "att")).toBe(true);
-	expect(shouldAutoWrap("a/S.pdf", s, "att")).toBe(false);   // wrapped
-	expect(shouldAutoWrap("a/N.pdf", s, "att")).toBe(false);   // note of that name exists
-	expect(shouldAutoWrap("att/x.pdf", s, "att")).toBe(false); // attachment folder
-	expect(shouldAutoWrap("att/x.pdf", s, null)).toBe(true);
-	expect(shouldAutoWrap("gone.pdf", s, null)).toBe(false);
+	const inAtt = autoWrapChecker(s, "att");
+	expect(inAtt("a/New.pdf")).toBe(true);
+	expect(inAtt("a/S.pdf")).toBe(false);   // wrapped
+	expect(inAtt("a/N.pdf")).toBe(false);   // note of that name exists
+	expect(inAtt("att/x.pdf")).toBe(false); // attachment folder
+	expect(autoWrapChecker(s, null)("att/x.pdf")).toBe(true);
+	expect(autoWrapChecker(s, null)("gone.pdf")).toBe(false);
 });
-test("shouldAutoWrap treats a note of that name as present ignoring case", () => {
-	expect(shouldAutoWrap("a/N.pdf", snap([], ["a/N.pdf"], ["a/n.md"]), null)).toBe(false);
+test("autoWrapChecker treats a note of that name as present ignoring case", () => {
+	expect(autoWrapChecker(snap([], ["a/N.pdf"], ["a/n.md"]), null)("a/N.pdf")).toBe(false);
 });
 test("autoWrapChecker gives the expected answer for every PDF of one snapshot, per attachment folder", () => {
 	const s = snap([m("a/S.md"), m("S.md", { markerLink: "a/New.pdf", linkedPdf: "a/New.pdf", ownTargets: ["a/New.pdf"] })],
@@ -468,7 +468,6 @@ test("autoWrapChecker gives the expected answer for every PDF of one snapshot, p
 		const check = autoWrapChecker(s, folder);
 		for (const [pdf, answers] of Object.entries(expected)) {
 			expect([pdf, folder, check(pdf)]).toEqual([pdf, folder, answers[i]]);
-			expect([pdf, folder, shouldAutoWrap(pdf, s, folder)]).toEqual([pdf, folder, answers[i]]);
 		}
 	});
 });

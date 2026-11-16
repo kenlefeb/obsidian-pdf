@@ -80,7 +80,7 @@ export class OwnChanges {
 export const PENDING_CREATE_TTL_MS = 10000;
 
 /**
- * Notes just created inside Obsidian whose claim the metadata cache may not have indexed yet when their `create`
+ * Notes just created inside Obsidian whose marker the metadata cache may not have indexed yet when their `create`
  * event is handled. The Watcher reacts to them once more when the cache reports them changed.
  */
 export class PendingCreates {

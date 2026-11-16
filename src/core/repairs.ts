@@ -261,15 +261,11 @@ export function isBulkConvertible(item: ListItem, pairing: Pairing): boolean {
 	return pair !== null && pair.pdfPath !== null;
 }
 
-/** True when a PDF should be wrapped automatically: it exists, is unwrapped, has no note of its name, and is outside the attachment folder. */
-export function shouldAutoWrap(pdfPath: string, snapshot: VaultSnapshot, attachmentFolder: string | null): boolean {
-	return autoWrapChecker(snapshot, attachmentFolder)(pdfPath);
-}
-
 /**
- * `shouldAutoWrap` for many PDFs of one snapshot: indexes the snapshot once (PDF paths, the PDFs that link-valued
- * markers point to, and the lower-cased folder and base name of every note), so each check takes constant time. A
- * healthy pair's PDF has its note beside it, so the note check covers it.
+ * The test for whether a PDF should be wrapped automatically: it exists, is unwrapped, has no note of its name, and is
+ * outside the attachment folder. Indexes the snapshot once (PDF paths, the PDFs that link-valued markers point to, and
+ * the lower-cased folder and base name of every note), so each check takes constant time. A healthy pair's PDF has its
+ * note beside it, so the note check covers it.
  */
 export function autoWrapChecker(snapshot: VaultSnapshot, attachmentFolder: string | null): (pdfPath: string) => boolean {
 	const pdfs = new Set(snapshot.pdfPaths);
