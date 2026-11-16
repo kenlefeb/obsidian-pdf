@@ -19,7 +19,7 @@ import {
 	WrapRefusal,
 } from "../pdf-wrapper.ts";
 import type { Executor } from "./execute.ts";
-import { gatherSnapshot } from "./snapshot.ts";
+import { gatherVault } from "./vault-snapshot.ts";
 
 /** Local-storage key of the per-device switch. Local storage is not synced, unlike the plugin's settings. */
 export const AUTO_WRAP_KEY = "pdf-wrapper-auto-wrap";
@@ -38,23 +38,26 @@ const reason = (error: unknown): string => (error instanceof Error ? error.messa
 const SLOW_WRAP_MS = 60000;
 
 /**
- * Wraps PDFs that appear while the plugin runs, but only those still unclaimed and without a note of their name
+ * Wraps PDFs that appear while the plugin runs, but only those still unwrapped and without a note of their name
  * once they are due (a PDF made inside Obsidian after a couple of seconds, one from outside after 15 to 30 s, so a
  * note that is about to arrive by sync wins). Wraps run one at a time, each judged against a snapshot taken after
  * the one before finished. Notices are summarised once per pass. Call `unload()` when the plugin unloads.
+ *
+ * A PDF from outside is not wrapped, and not tried again, if a marked note without a PDF may be its note still
+ * arriving when it comes due (`heldForArrivingNote`): it stays listed as "Not wrapped".
  *
  * When Templater hands back no note (the template failed, its prompt was cancelled, or notes appeared elsewhere that
  * are only named), the pass pauses: the PDFs waiting then are held, not tried again until some later wrap succeeds
  * (a manual one, or an automatic one of a PDF that arrives afterwards). They stay listed as "Not wrapped" meanwhile.
  */
 export class AutoWrapper {
-	/** PDF path to the time it becomes due; insertion order is arrival order. */
-	private readonly pending = new Map<string, number>();
+	/** PDF path to the time it becomes due and where it came from; insertion order is arrival order. */
+	private readonly pending = new Map<string, { due: number; origin: ArrivalOrigin }>();
 	private timer: number | null = null;
 	private running = false;
 	private unloaded = false;
 	/** PDFs that were waiting when a pass paused because Templater handed back no note. Held for this session only. */
-	private readonly held = new Set<string>();
+	private readonly held = new Map<string, ArrivalOrigin>();
 	private readonly stopListening: () => void;
 
 	constructor(
@@ -75,20 +78,20 @@ export class AutoWrapper {
 	private resume(): void {
 		if (this.unloaded || this.held.size === 0) return;
 		const now = Date.now();
-		for (const path of this.held) this.pending.set(path, now);
+		for (const [path, origin] of this.held) this.pending.set(path, { due: now, origin });
 		this.held.clear();
 		// While a pass is running it picks them up itself.
 		if (!this.running) this.scheduleAt(this.earliestDue());
 	}
 
-	/** Queues the PDF; it is wrapped once due, only if shouldAutoWrap is still true against a fresh snapshot. */
+	/** Queues the PDF; it is wrapped once due, only if `planAutoWrap` still says so against a fresh snapshot. */
 	onPdfCreated(path: string, local: boolean): void {
 		if (this.unloaded) return;
 		const origin: ArrivalOrigin = local ? "local" : "outside";
 		const due = autoWrapDueAt(Date.now(), origin);
 		// Arriving again counts as a new arrival, even while held.
 		this.held.delete(path);
-		this.pending.set(path, due);
+		this.pending.set(path, { due, origin });
 		// While a pass is running it picks the new PDF up itself.
 		if (!this.running) this.scheduleAt(this.earliestDue());
 	}
@@ -104,7 +107,7 @@ export class AutoWrapper {
 
 	private earliestDue(): number | null {
 		let earliest: number | null = null;
-		for (const due of this.pending.values()) earliest = earliest === null ? due : Math.min(earliest, due);
+		for (const { due } of this.pending.values()) earliest = earliest === null ? due : Math.min(earliest, due);
 		return earliest;
 	}
 
@@ -138,8 +141,8 @@ export class AutoWrapper {
 					break;
 				}
 				// Taken fresh for every wrap: the previous one has finished and may have changed the vault.
-				const snapshot = gatherSnapshot(this.app, this.getSettings().markerProperty);
-				const pending = [...this.pending].map(([path, due]) => ({ path, due }));
+				const snapshot = gatherVault(this.app, this.getSettings());
+				const pending = [...this.pending].map(([path, { due, origin }]) => ({ path, due, origin }));
 				const plan = planAutoWrap(pending, Date.now(), snapshot, this.attachmentFolder());
 				for (const path of plan.drop) this.pending.delete(path);
 				const next = plan.wrap[0];
@@ -147,6 +150,7 @@ export class AutoWrapper {
 					this.scheduleAt(plan.waitUntil);
 					break;
 				}
+				const origin = this.pending.get(next)?.origin ?? "outside";
 				this.pending.delete(next);
 				const outcome = await this.wrapOne(next, (message) => converted.push(message));
 				outcomes.push(outcome);
@@ -154,8 +158,8 @@ export class AutoWrapper {
 				if (!this.unloaded) this.onWrapped();
 				if (pausesAutoWrap(outcome)) {
 					// The template would most likely fail the same way for the rest: hold them until a wrap succeeds.
-					this.held.add(next);
-					for (const path of this.pending.keys()) this.held.add(path);
+					this.held.set(next, origin);
+					for (const [path, waiting] of this.pending) this.held.set(path, waiting.origin);
 					this.pending.clear();
 					this.cancelTimer();
 					break;

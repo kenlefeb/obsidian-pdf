@@ -10,15 +10,18 @@ import {
 	planAutoWrap,
 	stoppedMessage,
 	summarizeWraps,
+	type ArrivalOrigin,
 	type WrapOutcome,
 } from '../../src/core/auto-wrap.ts';
 import type { MarkedNote } from '../../src/core/model.ts';
 import { pairUp } from '../../src/core/pairing.ts';
-import type { NoteClaim, Snapshot } from '../../src/core/types.ts';
+import type { VaultSnapshot } from '../../src/core/model.ts';
 
-const snap = (notePaths: string[], pdfPaths: string[], claims: NoteClaim[] = []): Snapshot => ({ notePaths, pdfPaths, claims });
-const claim = (notePath: string, pdfPath: string): NoteClaim => ({ notePath, pdfPath, rawTarget: pdfPath });
-const pend = (path: string, due: number) => ({ path, due });
+const flagged = (notePath: string): MarkedNote => ({ notePath, markerLink: null, linkedPdf: null, ownTargets: [] });
+/** A note whose marker is still a link to `pdfPath` (the earlier format). */
+const linking = (notePath: string, pdfPath: string): MarkedNote => ({ notePath, markerLink: pdfPath, linkedPdf: pdfPath, ownTargets: [pdfPath] });
+const snap = (notePaths: string[], pdfPaths: string[], marked: MarkedNote[] = []): VaultSnapshot => ({ notePaths, pdfPaths, marked });
+const pend = (path: string, due: number, origin: ArrivalOrigin = 'local') => ({ path, due, origin });
 
 test('the timings are the specified ones', () => {
 	expect([AUTO_WRAP_LOCAL_SETTLE_MS, AUTO_WRAP_OUTSIDE_SETTLE_MS, AUTO_WRAP_OUTSIDE_JITTER_MS]).toEqual([2000, 15000, 15000]);
@@ -50,8 +53,8 @@ test('a due PDF whose note arrived meanwhile is dropped, not wrapped', () => {
 	expect(plan).toEqual({ wrap: [], drop: ['a/New.pdf'], waitUntil: null });
 });
 
-test('a due PDF that a note claims, that vanished, or that sits in the attachment folder is dropped', () => {
-	const s = snap(['a/Other.md'], ['a/Claimed.pdf', 'att/x.pdf'], [claim('a/Other.md', 'a/Claimed.pdf')]);
+test("a due PDF that a note's link-valued marker points to, that vanished, or that sits in the attachment folder is dropped", () => {
+	const s = snap(['a/Other.md'], ['a/Claimed.pdf', 'att/x.pdf'], [linking('a/Other.md', 'a/Claimed.pdf')]);
 	const pending = ['a/Claimed.pdf', 'gone.pdf', 'att/x.pdf'].map((path) => pend(path, 0));
 	expect(planAutoWrap(pending, 5000, s, 'att')).toEqual({ wrap: [], drop: ['a/Claimed.pdf', 'gone.pdf', 'att/x.pdf'], waitUntil: null });
 });
@@ -67,6 +70,23 @@ test('waitUntil is the earliest remaining due time, whatever the order', () => {
 	const plan = planAutoWrap(pending, 2600, snap([], ['z.pdf', 'late1.pdf', 'late2.pdf']), null);
 	expect(plan.wrap).toEqual(['z.pdf']);
 	expect(plan.waitUntil).toBe(9000);
+});
+
+test('a due PDF from outside is dropped, not wrapped, while a marked note without a PDF may be its note still arriving', () => {
+	// A rename in transit (same folder) and a move in transit (same name elsewhere).
+	const s = snap(['a/Old.md', 'c/S.md'], ['a/New.pdf', 'b/S.pdf', 'd/Free.pdf'], [flagged('a/Old.md'), flagged('c/S.md')]);
+	const pending = [pend('a/New.pdf', 0, 'outside'), pend('b/S.pdf', 0, 'outside'), pend('d/Free.pdf', 0, 'outside')];
+	expect(planAutoWrap(pending, 5000, s, null)).toEqual({ wrap: ['d/Free.pdf'], drop: ['a/New.pdf', 'b/S.pdf'], waitUntil: null });
+});
+
+test('a held PDF from outside is not examined before it is due', () => {
+	const s = snap(['a/Old.md'], ['a/New.pdf'], [flagged('a/Old.md')]);
+	expect(planAutoWrap([pend('a/New.pdf', 3000, 'outside')], 2999, s, null)).toEqual({ wrap: [], drop: [], waitUntil: 3000 });
+});
+
+test('a PDF made inside Obsidian is wrapped whatever marked notes lack a PDF', () => {
+	const s = snap(['a/Old.md', 'c/New.md'], ['a/New.pdf'], [flagged('a/Old.md'), flagged('c/New.md')]);
+	expect(planAutoWrap([pend('a/New.pdf', 0, 'local')], 5000, s, null)).toEqual({ wrap: ['a/New.pdf'], drop: [], waitUntil: null });
 });
 
 test('nothing pending means nothing to do', () => {

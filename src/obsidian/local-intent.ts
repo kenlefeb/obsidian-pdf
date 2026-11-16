@@ -1,6 +1,6 @@
 import { TFolder, type App, type DataWriteOptions, type FileManager, type TAbstractFile, type Vault } from "obsidian";
 import { around } from "monkey-around";
-import { IntentMarks } from "../core/marks.ts";
+import { CopySources, IntentMarks } from "../core/marks.ts";
 
 /**
  * Notes which paths are being changed by this device's own Obsidian, by wrapping
@@ -11,10 +11,14 @@ import { IntentMarks } from "../core/marks.ts";
  * It also tracks every wrapped call still running (including `FileManager.renameFile`,
  * which rewrites links after `Vault.rename` has returned), so a reaction can wait until
  * the user's own operation has fully finished.
+ *
+ * And it remembers, for a moment, which file each file copied through `Vault.copy` was copied from, so an in-app copy
+ * of a wrapped note can be followed by a copy of its PDF.
  */
 export class LocalIntent {
 	private readonly marks = new IntentMarks();
 	private readonly inFlight = new Set<Promise<unknown>>();
+	private readonly copies = new CopySources();
 
 	constructor(private readonly app: App) {}
 
@@ -48,6 +52,8 @@ export class LocalIntent {
 			});
 		};
 
+		const copies = this.copies;
+
 		// Wrap the instances rather than the prototypes: Obsidian reaches these methods
 		// through `app.vault` and `app.fileManager`, and an own property on the instance shadows
 		// the prototype for every caller without altering the class for anything else.
@@ -69,7 +75,18 @@ export class LocalIntent {
 					// A folder mark is never used up and answers for every path inside for 5 s, so a sync or Finder delete
 					// there would read as local. A folder copy is therefore only followed (kept in flight), not marked.
 					if (file instanceof TFolder) return follow(() => next.call(this, file, newPath)) as Promise<T>;
-					return trackPath(newPath, false, () => next.call(this, file, newPath)) as Promise<T>;
+					// Recorded before the call, because the copy's `create` event can arrive before the call returns. Only
+					// for a file: a folder copy names no single source.
+					copies.record(newPath, file.path);
+					return trackPath(newPath, false, async () => {
+						try {
+							return await next.call(this, file, newPath);
+						} catch (error) {
+							// The copy did not happen: nothing at that path is a copy of this file.
+							copies.take(newPath);
+							throw error;
+						}
+					}) as Promise<T>;
 				};
 			},
 			rename(next) {
@@ -119,6 +136,14 @@ export class LocalIntent {
 	 */
 	consumeFileMark(path: string): boolean {
 		return this.marks.consumeFileMark(path);
+	}
+
+	/**
+	 * The file that `destPath` was copied from by a `Vault.copy` of a single file in the last 10 s, once; null when
+	 * no such copy was seen (a folder copy records nothing). Asking uses the record up.
+	 */
+	copySource(destPath: string): string | null {
+		return this.copies.take(destPath);
 	}
 
 	/** Resolves once no wrapped call is running (at once when none is). Never rejects. */

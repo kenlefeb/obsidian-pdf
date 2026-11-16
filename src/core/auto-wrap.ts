@@ -1,7 +1,7 @@
-import type { Pairing } from "./model.ts";
+import type { Pairing, VaultSnapshot } from "./model.ts";
+import { pairUp } from "./pairing.ts";
 import { basename, dirname } from "./paths.ts";
-import { autoWrapChecker } from "./react.ts";
-import type { Snapshot } from "./types.ts";
+import { autoWrapChecker } from "./repairs.ts";
 
 /** How long a PDF created by an action inside Obsidian on this device settles before it is judged. */
 export const AUTO_WRAP_LOCAL_SETTLE_MS = 2000;
@@ -25,34 +25,45 @@ export function autoWrapDueAt(now: number, origin: ArrivalOrigin, random: () => 
 export interface PendingPdf {
 	path: string;
 	due: number;
+	origin: ArrivalOrigin;
 }
 
 export interface AutoWrapPlan {
 	/** Due PDFs that should be wrapped now, in arrival order. */
 	wrap: string[];
-	/** Due PDFs that need nothing (claimed, noted, gone or in the attachment folder): forget them. */
+	/**
+	 * Due PDFs to forget: those that need nothing (a link-valued marker points to it, it has a note, it is gone or in
+	 * the attachment folder), and those from outside held back for a note that may still be arriving.
+	 */
 	drop: string[];
 	/** When the earliest PDF that is not due yet becomes due, or null when none is waiting. */
 	waitUntil: number | null;
 }
 
 /**
- * Judges each pending PDF once it is due, against `snapshot`. A PDF that is not due yet is left alone.
- * The snapshot must be taken after any earlier wrap has finished.
+ * Judges each pending PDF once it is due, against `snapshot`. A PDF that is not due yet is left alone. A due PDF
+ * that arrived from outside is dropped, not wrapped and not tried again, while `heldForArrivingNote` is true for it;
+ * one made inside Obsidian is not held. The snapshot must be taken after any earlier wrap has finished.
  */
 export function planAutoWrap(
 	pending: PendingPdf[],
 	now: number,
-	snapshot: Snapshot,
+	snapshot: VaultSnapshot,
 	attachmentFolder: string | null,
 ): AutoWrapPlan {
 	const plan: AutoWrapPlan = { wrap: [], drop: [], waitUntil: null };
 	// Indexed once per call: a pass over hundreds of new PDFs in a large vault must not compare every pair of files.
 	const shouldWrap = autoWrapChecker(snapshot, attachmentFolder);
-	for (const { path, due } of pending) {
+	// Paired only when a due PDF from outside needs it.
+	let pairing: Pairing | null = null;
+	const isHeld = (path: string): boolean => {
+		pairing = pairing ?? pairUp(snapshot);
+		return heldForArrivingNote(path, pairing);
+	};
+	for (const { path, due, origin } of pending) {
 		if (due > now) {
 			plan.waitUntil = plan.waitUntil === null ? due : Math.min(plan.waitUntil, due);
-		} else if (shouldWrap(path)) {
+		} else if (shouldWrap(path) && !(origin === "outside" && isHeld(path))) {
 			plan.wrap.push(path);
 		} else {
 			plan.drop.push(path);

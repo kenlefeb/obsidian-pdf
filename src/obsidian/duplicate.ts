@@ -1,25 +1,27 @@
-import { Notice, type App, type TFile } from "obsidian";
+import { Notice, TFile, type App } from "obsidian";
 import { duplicatePaths, leftoverMessage, type DuplicateProgress } from "../core/duplicate.ts";
-import { basename, filename, samePair } from "../core/paths.ts";
-import type { Action } from "../core/types.ts";
+import type { FileAction } from "../core/model.ts";
+import { findPdfBeside } from "../core/pairing.ts";
+import { isNote, isPdf } from "../core/paths.ts";
 import type { PdfWrapperSettings } from "../core/settings-data.ts";
 import type { Executor } from "./execute.ts";
-import { gatherSnapshot, readClaim } from "./snapshot.ts";
+import { readMarked, templateLocations } from "./vault-snapshot.ts";
 
 /** Notes being duplicated right now, so a second invocation for the same note is ignored. */
 const inFlight = new Set<string>();
 
-/** The PDF of the note's healthy pair (claimed, existing, same folder and base name), or null. */
+/** The PDF of the note's healthy pair (the note is marked and a PDF of its name is beside it), or null. */
 export function healthyPdf(app: App, settings: PdfWrapperSettings, note: TFile): TFile | null {
-	const claim = readClaim(app, note, settings.markerProperty);
-	if (!claim || claim.pdfPath === null || !samePair(note.path, claim.pdfPath)) return null;
-	return app.vault.getFileByPath(claim.pdfPath);
+	if (readMarked(app, note, settings.markerProperty, templateLocations(app, settings)) === null) return null;
+	const beside = (note.parent?.children ?? []).filter((file): file is TFile => file instanceof TFile && isPdf(file.path));
+	const pdfPath = findPdfBeside(note.path, beside.map((file) => file.path));
+	return pdfPath === null ? null : app.vault.getFileByPath(pdfPath);
 }
 
 /**
- * Copies a wrapped document's note and PDF under a shared new number and points the copy's marker at the
- * copied PDF. The PDF is copied first: if the note copy then fails, what is left is a plain PDF, not a note
- * claiming the original's PDF. The Executor reports failures itself; this only explains what was left behind.
+ * Copies a wrapped document's note and PDF under a shared new number. Nothing else: the copies pair by name, so no
+ * note is edited. The PDF is copied first: if the note copy then fails, what is left is a plain PDF, not a marked
+ * note without one. The Executor reports failures itself; this only explains what was left behind.
  */
 export async function duplicateWrapped(
 	app: App,
@@ -31,7 +33,7 @@ export async function duplicateWrapped(
 	const pdf = healthyPdf(app, settings, note);
 	if (!pdf) {
 		new Notice(
-			`Cannot duplicate ${note.name}: it is not a wrapped document. Its "${settings.markerProperty}" property must link to a PDF with the same name in the same folder.`,
+			`Cannot duplicate ${note.name}: it is not a wrapped document. It needs the "${settings.markerProperty}" property and a PDF with the same name in the same folder.`,
 		);
 		return;
 	}
@@ -41,17 +43,16 @@ export async function duplicateWrapped(
 	}
 	inFlight.add(note.path);
 	try {
-		const target = duplicatePaths(note.path, pdf.path, gatherSnapshot(app, settings.markerProperty));
-		const oldTargets = [...new Set([pdf.path, filename(pdf.path), basename(pdf.path)])];
-		const done: DuplicateProgress = { pdf: false, note: false, claim: false };
-		const steps: [keyof DuplicateProgress, Action][] = [
+		const paths = app.vault.getFiles().map((file) => file.path);
+		const target = duplicatePaths(note.path, pdf.path, { notePaths: paths.filter(isNote), pdfPaths: paths.filter(isPdf) });
+		const done: DuplicateProgress = { pdf: false, note: false };
+		const steps: [keyof DuplicateProgress, FileAction][] = [
 			["pdf", { type: "copy", from: pdf.path, to: target.pdf }],
 			["note", { type: "copy", from: note.path, to: target.note }],
-			["claim", { type: "setClaim", notePath: target.note, pdfPath: target.pdf, oldTargets }],
 		];
 		let stopped = false;
-		// Deliberately not stopped when the plugin unloads: the remaining steps run, because a finished copy is safer
-		// than a half-made one (a copied note still claiming the original's PDF). The Watcher does the same.
+		// Deliberately not stopped when the plugin unloads: the note copy still runs, because a finished copy is safer
+		// than a PDF left without its note.
 		for (const [step, action] of steps) {
 			try {
 				if (!(await executor.run([action]))) {
@@ -67,7 +68,7 @@ export async function duplicateWrapped(
 			}
 		}
 		if (stopped) {
-			const message = leftoverMessage(done, target, settings.markerProperty);
+			const message = leftoverMessage(done, target);
 			if (message) new Notice(message, 10000);
 			return;
 		}
