@@ -124,7 +124,21 @@ export function follow(event: FollowEvent, snapshot: VaultSnapshot): FollowResul
 	return { ...result, recheck: result.recheck || touchesPair };
 }
 
-/** The one candidate whose text equals newText exactly; null for none or several. */
+/**
+ * True when `newBase` reads as the name of a copy of `sourceBase` (base names, without folder or extension): the
+ * source's name, exactly, followed by something that does not start with a letter or digit. So "S 1", "S copy",
+ * "S (1)" and "S-1" are copies of "S"; "Statement", "S1" and "Untitled" are not. Guards the search for a copy's
+ * source by text, where notes made from one template are identical.
+ */
+export function isCopyLikeName(newBase: string, sourceBase: string): boolean {
+	if (sourceBase === "" || newBase.length <= sourceBase.length || !newBase.startsWith(sourceBase)) return false;
+	return !/^[\p{L}\p{N}]/u.test(newBase.slice(sourceBase.length));
+}
+
+/**
+ * The one candidate whose text equals newText exactly; null for none or several. The caller offers only candidates
+ * whose name passes `isCopyLikeName`.
+ */
 export function copySourceByText(newText: string, candidates: { notePath: string; text: string }[]): string | null {
 	const same = candidates.filter((candidate) => candidate.text === newText);
 	return same.length === 1 ? same[0]!.notePath : null;

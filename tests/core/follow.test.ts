@@ -1,5 +1,5 @@
 import { expect, test } from "vitest";
-import { copySourceByText, follow } from "../../src/core/follow.ts";
+import { copySourceByText, follow, isCopyLikeName } from "../../src/core/follow.ts";
 import type { MarkedNote, VaultSnapshot } from "../../src/core/model.ts";
 
 const m = (notePath: string): MarkedNote => ({ notePath, markerLink: null, linkedPdf: null, ownTargets: [] });
@@ -260,4 +260,24 @@ test("copySourceByText: none identical, or no candidates", () => {
 });
 test("copySourceByText: two identical candidates cannot be told apart", () => {
 	expect(copySourceByText("x", [{ notePath: "a/A.md", text: "x" }, { notePath: "a/B.md", text: "x" }])).toBeNull();
+});
+
+// A copy's name: the source's name with something added after it.
+
+test("isCopyLikeName: the source's name followed by something that is not a letter or digit", () => {
+	for (const name of ["S 1", "S copy", "S (1)", "S-1", "S_copy", "S.2"]) expect(isCopyLikeName(name, "S")).toBe(true);
+	expect(isCopyLikeName("Statement 2024 1", "Statement 2024")).toBe(true);
+});
+test("isCopyLikeName: a longer word or number that only starts the same is not a copy", () => {
+	expect(isCopyLikeName("Statement", "S")).toBe(false);
+	expect(isCopyLikeName("S1", "S")).toBe(false);
+	expect(isCopyLikeName("Sé", "S")).toBe(false);
+	expect(isCopyLikeName("Report 20", "Report 2")).toBe(false);
+});
+test("isCopyLikeName: the same name, a shorter one, or an unrelated one is not a copy", () => {
+	expect(isCopyLikeName("S", "S")).toBe(false);
+	expect(isCopyLikeName("S", "S 1")).toBe(false);
+	expect(isCopyLikeName("Untitled", "S")).toBe(false);
+	expect(isCopyLikeName("s 1", "S")).toBe(false);
+	expect(isCopyLikeName(" 1", "")).toBe(false);
 });

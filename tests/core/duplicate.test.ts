@@ -1,5 +1,6 @@
 import { expect, test } from 'vitest';
 import { duplicatePaths, leftoverMessage } from '../../src/core/duplicate.ts';
+
 const snap = (notePaths: string[], pdfPaths: string[]) => ({ notePaths, pdfPaths });
 
 test('picks 1 when nothing is taken', () => {

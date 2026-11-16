@@ -13,9 +13,8 @@ import {
 	type ArrivalOrigin,
 	type WrapOutcome,
 } from '../../src/core/auto-wrap.ts';
-import type { MarkedNote } from '../../src/core/model.ts';
+import type { MarkedNote, VaultSnapshot } from '../../src/core/model.ts';
 import { pairUp } from '../../src/core/pairing.ts';
-import type { VaultSnapshot } from '../../src/core/model.ts';
 
 const flagged = (notePath: string): MarkedNote => ({ notePath, markerLink: null, linkedPdf: null, ownTargets: [] });
 /** A note whose marker is still a link to `pdfPath` (the earlier format). */

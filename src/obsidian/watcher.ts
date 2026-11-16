@@ -1,11 +1,11 @@
 import { Notice, TFile, type CachedMetadata, type Plugin, type TAbstractFile } from "obsidian";
 import { claimChanged } from "../core/claims.ts";
-import { copySourceByText, follow } from "../core/follow.ts";
+import { copySourceByText, follow, isCopyLikeName } from "../core/follow.ts";
 import { textLinksToPdf } from "../core/links.ts";
 import { isMarked, isTemplatePath } from "../core/marker.ts";
 import type { FollowEvent, VaultSnapshot } from "../core/model.ts";
 import { findPdfBeside, healthyPairs, pairUp } from "../core/pairing.ts";
-import { dirname, isNote, isPdf } from "../core/paths.ts";
+import { basename, dirname, isNote, isPdf } from "../core/paths.ts";
 import type { PdfWrapperSettings } from "../core/settings-data.ts";
 import { PendingCreates, type OwnChanges } from "../core/marks.ts";
 import { waitAtMost, type CappedWait } from "../core/wait.ts";
@@ -191,11 +191,13 @@ export class Watcher {
 	/**
 	 * Follows once more a note created inside Obsidian, now that the metadata cache has indexed it. The entry is
 	 * used up when this runs, not when it is queued: if the first pass already acted (its marker was readable then),
-	 * it dropped the entry, and this pass is skipped, so a taken PDF name gives one notice, not two.
+	 * it dropped the entry, and this pass is skipped, so a taken PDF name gives one notice, not two. The setting is
+	 * read again: switched off since the create, the PDF is not copied.
 	 */
 	private continueLocalCreate(path: string): void {
-		const copiedFrom = this.createdFrom.get(path) ?? null;
-		this.enqueue({ kind: "create", path, local: true, copiedFrom }, () => this.consumeCreate(path));
+		const local = this.deps.getSettings().followRenames;
+		const copiedFrom = local ? this.createdFrom.get(path) ?? null : null;
+		this.enqueue({ kind: "create", path, local, copiedFrom }, () => this.consumeCreate(path));
 	}
 
 	/** True, once, while the note at `path` is a recent in-app create that has not been acted on. */
@@ -226,13 +228,21 @@ export class Watcher {
 		this.enqueue({ kind: "delete", path: file.path, local, wasMarked: this.wasMarked(file.path, prevCache), linkedElsewhere: true });
 	}
 
-	/** True when the deleted note carried the marker, by its previous cache. A template is never a marked note. */
+	/**
+	 * True when the deleted note carried the marker, by its previous cache. A template is never a marked note. If it
+	 * cannot be told, false: the delete is then not followed, so the PDF stays.
+	 */
 	private wasMarked(notePath: string, prevCache: CachedMetadata | null): boolean {
-		const settings = this.deps.getSettings();
-		const frontmatter = prevCache?.frontmatter;
-		if (!frontmatter || !Object.prototype.hasOwnProperty.call(frontmatter, settings.markerProperty)) return false;
-		if (!isMarked(frontmatter[settings.markerProperty])) return false;
-		return !isTemplatePath(notePath, templateLocations(this.plugin.app, settings));
+		try {
+			const settings = this.deps.getSettings();
+			const frontmatter = prevCache?.frontmatter;
+			if (!frontmatter || !Object.prototype.hasOwnProperty.call(frontmatter, settings.markerProperty)) return false;
+			if (!isMarked(frontmatter[settings.markerProperty])) return false;
+			return !isTemplatePath(notePath, templateLocations(this.plugin.app, settings));
+		} catch (error) {
+			console.error("PDF Wrapper: could not tell whether the deleted note was marked", notePath, error);
+			return false;
+		}
 	}
 
 	/** True for the plugin's own change. Also uses up the local-intent mark and the copy source the same change left. */
@@ -271,7 +281,7 @@ export class Watcher {
 				if (this.unloaded) return;
 			}
 			let snapshot = this.snapshotAfter(event);
-			if (event.kind === "create" && event.local && event.copiedFrom === null) {
+			if (event.kind === "create" && isNote(event.path) && event.local && event.copiedFrom === null) {
 				const copiedFrom = await this.copySourceByText(event.path, snapshot);
 				if (this.unloaded) return;
 				if (copiedFrom !== null) {
@@ -323,8 +333,9 @@ export class Watcher {
 	/**
 	 * For a note made inside Obsidian that no `Vault.copy` named a source for: the note it is a copy of, judged by
 	 * its text. Only when the new note is marked and has no PDF (so only once it is indexed), and only among the notes
-	 * of healthy pairs in the same folder; the answer is the one whose text is identical, or null when none or several
-	 * are. Read-only (`cachedRead`). On any error answers null, and the copy is listed as "PDF not found".
+	 * of healthy pairs in the same folder whose name the new note's name continues (`isCopyLikeName`); the answer is
+	 * the one whose text is identical, or null when none or several are. A note of another size cannot be identical
+	 * and is not read. Read-only (`cachedRead`). On any error answers null, and the copy is listed as "PDF not found".
 	 */
 	private async copySourceByText(path: string, snapshot: VaultSnapshot): Promise<string | null> {
 		try {
@@ -334,15 +345,16 @@ export class Watcher {
 			const created = vault.getFileByPath(path);
 			if (created === null) return null;
 			const folder = dirname(path);
+			const name = basename(path);
 			const sources = healthyPairs(pairUp(snapshot))
-				.map((pair) => pair.notePath)
-				.filter((notePath) => notePath !== path && dirname(notePath) === folder);
+				.filter((pair) => pair.notePath !== path && dirname(pair.notePath) === folder && isCopyLikeName(name, basename(pair.notePath)))
+				.map((pair) => vault.getFileByPath(pair.notePath))
+				.filter((note): note is TFile => note !== null && note.stat.size === created.stat.size);
 			if (sources.length === 0) return null;
 			const text = await vault.cachedRead(created);
 			const candidates: { notePath: string; text: string }[] = [];
-			for (const notePath of sources) {
-				const note = vault.getFileByPath(notePath);
-				if (note !== null) candidates.push({ notePath, text: await vault.cachedRead(note) });
+			for (const note of sources) {
+				candidates.push({ notePath: note.path, text: await vault.cachedRead(note) });
 				if (this.unloaded) return null;
 			}
 			return copySourceByText(text, candidates);
