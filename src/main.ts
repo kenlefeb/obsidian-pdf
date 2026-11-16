@@ -10,6 +10,7 @@ import { installExplorerStyle } from "./obsidian/explorer-style.ts";
 import { AttentionStore, attachmentFolder, scanAtStartup } from "./obsidian/attention-store.ts";
 import { AutoWrapper, isAutoWrapOn } from "./obsidian/auto-wrap.ts";
 import { registerCommands, showStartupNotice } from "./obsidian/commands.ts";
+import { registerPdfBlock } from "./obsidian/pdf-block.ts";
 
 export default class PdfWrapperPlugin extends Plugin {
 	settings!: PdfWrapperSettings;
@@ -59,6 +60,8 @@ export default class PdfWrapperPlugin extends Plugin {
 			refreshSoon: () => refreshSoon(),
 		});
 		watcher.start();
+
+		registerPdfBlock(this);
 
 		const commands = registerCommands(this, { executor, store, refreshSoon: () => refreshSoon() });
 		this.app.workspace.onLayoutReady(() => {
