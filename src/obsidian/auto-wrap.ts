@@ -1,0 +1,209 @@
+import { Notice, type App } from "obsidian";
+import {
+	autoWrapDueAt,
+	heldMessage,
+	pausesAutoWrap,
+	planAutoWrap,
+	stoppedMessage,
+	summarizeWraps,
+	type ArrivalOrigin,
+	type WrapOutcome,
+} from "../core/auto-wrap.ts";
+import type { PdfWrapperSettings } from "../core/settings-data.ts";
+import { convertedSummary } from "../core/convert.ts";
+import {
+	CONVERTED_NOTICE_MS,
+	isTemplateProblem,
+	onWrapSucceeded,
+	WrapIncomplete,
+	WrapMessage,
+	WrapRefusal,
+} from "../pdf-wrapper.ts";
+import type { Executor } from "./execute.ts";
+import { gatherVault } from "./vault-snapshot.ts";
+
+/** Local-storage key of the per-device switch. Local storage is not synced, unlike the plugin's settings. */
+export const AUTO_WRAP_KEY = "pdf-wrapper-auto-wrap";
+
+export function isAutoWrapOn(app: App): boolean {
+	return app.loadLocalStorage(AUTO_WRAP_KEY) === true;
+}
+
+export function setAutoWrap(app: App, on: boolean): void {
+	app.saveLocalStorage(AUTO_WRAP_KEY, on ? true : null);
+}
+
+const reason = (error: unknown): string => (error instanceof Error ? error.message : String(error));
+
+/** A single wrap running this long leaves a trace in the console; it is never abandoned. */
+const SLOW_WRAP_MS = 60000;
+
+/**
+ * Wraps PDFs that appear while the plugin runs, but only those still unwrapped and without a note of their name
+ * once they are due (a PDF made inside Obsidian after a couple of seconds, one from outside after 15 to 30 s, so a
+ * note that is about to arrive by sync wins). Wraps run one at a time, each judged against a snapshot taken after
+ * the one before finished. Notices are summarised once per pass. Call `unload()` when the plugin unloads.
+ *
+ * A PDF from outside is not wrapped, and not tried again, if a marked note without a PDF may be its note still
+ * arriving when it comes due (`arrivingNoteFor`): it stays listed as "Not wrapped", and one console line says why.
+ *
+ * When Templater hands back no note (the template failed, its prompt was cancelled, or notes appeared elsewhere that
+ * are only named), the pass pauses: the PDFs waiting then are held, not tried again until some later wrap succeeds
+ * (a manual one, or an automatic one of a PDF that arrives afterwards). They stay listed as "Not wrapped" meanwhile.
+ */
+export class AutoWrapper {
+	/** PDF path to the time it becomes due and where it came from; insertion order is arrival order. */
+	private readonly pending = new Map<string, { due: number; origin: ArrivalOrigin }>();
+	private timer: number | null = null;
+	private running = false;
+	private unloaded = false;
+	/** PDFs that were waiting when a pass paused because Templater handed back no note. Held for this session only. */
+	private readonly held = new Map<string, ArrivalOrigin>();
+	private readonly stopListening: () => void;
+
+	constructor(
+		private readonly app: App,
+		private readonly executor: Executor,
+		private readonly getSettings: () => PdfWrapperSettings,
+		private readonly attachmentFolder: () => string | null,
+		/**
+		 * Called after each wrap attempt, so lists built from the vault can refresh while a long pass runs. The wraps
+		 * skip the Executor's own after-run refresh, so this should be a coalescing refresh.
+		 */
+		private readonly onWrapped: () => void = () => undefined,
+	) {
+		this.stopListening = onWrapSucceeded(() => this.resume());
+	}
+
+	/** A wrap succeeded, so the template works again: the held PDFs are due now. */
+	private resume(): void {
+		if (this.unloaded || this.held.size === 0) return;
+		const now = Date.now();
+		for (const [path, origin] of this.held) this.pending.set(path, { due: now, origin });
+		this.held.clear();
+		// While a pass is running it picks them up itself.
+		if (!this.running) this.scheduleAt(this.earliestDue());
+	}
+
+	/** Queues the PDF; it is wrapped once due, only if `planAutoWrap` still says so against a fresh snapshot. */
+	onPdfCreated(path: string, local: boolean): void {
+		if (this.unloaded) return;
+		const origin: ArrivalOrigin = local ? "local" : "outside";
+		const due = autoWrapDueAt(Date.now(), origin);
+		// Arriving again counts as a new arrival, even while held.
+		this.held.delete(path);
+		this.pending.set(path, { due, origin });
+		// While a pass is running it picks the new PDF up itself.
+		if (!this.running) this.scheduleAt(this.earliestDue());
+	}
+
+	/** Clears the timer and forgets every pending PDF. A wrap already under way finishes, silently. */
+	unload(): void {
+		this.unloaded = true;
+		this.stopListening();
+		this.pending.clear();
+		this.held.clear();
+		this.cancelTimer();
+	}
+
+	private earliestDue(): number | null {
+		let earliest: number | null = null;
+		for (const { due } of this.pending.values()) earliest = earliest === null ? due : Math.min(earliest, due);
+		return earliest;
+	}
+
+	private scheduleAt(time: number | null): void {
+		this.cancelTimer();
+		if (time === null || this.unloaded) return;
+		this.timer = window.setTimeout(() => {
+			this.timer = null;
+			if (!this.unloaded) void this.drain();
+		}, Math.max(0, time - Date.now()));
+	}
+
+	private cancelTimer(): void {
+		if (this.timer === null) return;
+		window.clearTimeout(this.timer);
+		this.timer = null;
+	}
+
+	private async drain(): Promise<void> {
+		if (this.running) return;
+		this.running = true;
+		const outcomes: WrapOutcome[] = [];
+		// What wraps took out of the notes they made (links the template put in), to be said once for the pass.
+		const converted: string[] = [];
+		let stopped: string | null = null;
+		try {
+			while (!this.unloaded) {
+				// Switched off while waiting: nothing waiting is wrapped.
+				if (!isAutoWrapOn(this.app)) {
+					this.pending.clear();
+					break;
+				}
+				// Taken fresh for every wrap: the previous one has finished and may have changed the vault.
+				const snapshot = gatherVault(this.app, this.getSettings());
+				const pending = [...this.pending].map(([path, { due, origin }]) => ({ path, due, origin }));
+				const plan = planAutoWrap(pending, Date.now(), snapshot, this.attachmentFolder());
+				for (const path of plan.drop) this.pending.delete(path);
+				for (const { pdfPath, notePath } of plan.held) console.warn(`PDF Wrapper: ${heldMessage(pdfPath, notePath)}`);
+				const next = plan.wrap[0];
+				if (next === undefined) {
+					this.scheduleAt(plan.waitUntil);
+					break;
+				}
+				const origin = this.pending.get(next)?.origin ?? "outside";
+				this.pending.delete(next);
+				const outcome = await this.wrapOne(next, (message) => converted.push(message));
+				outcomes.push(outcome);
+				// Also after a failure: the note may have been created before a later step failed.
+				if (!this.unloaded) this.onWrapped();
+				if (pausesAutoWrap(outcome)) {
+					// The template would most likely fail the same way for the rest: hold them until a wrap succeeds.
+					this.held.set(next, origin);
+					for (const [path, waiting] of this.pending) this.held.set(path, waiting.origin);
+					this.pending.clear();
+					this.cancelTimer();
+					break;
+				}
+			}
+		} catch (error) {
+			console.error("PDF Wrapper: automatic wrapping stopped", error);
+			this.pending.clear();
+			stopped = reason(error);
+		} finally {
+			this.running = false;
+		}
+		if (this.unloaded) return;
+		for (const message of summarizeWraps(outcomes)) new Notice(message);
+		const summary = convertedSummary(converted);
+		if (summary !== null) new Notice(summary, CONVERTED_NOTICE_MS);
+		if (stopped !== null) {
+			new Notice(stoppedMessage(stopped));
+		}
+	}
+
+	/** Never throws: a failure is an outcome, and the pass goes on. */
+	private async wrapOne(path: string, onConverted: (message: string) => void): Promise<WrapOutcome> {
+		const name = this.app.vault.getFileByPath(path)?.basename ?? path;
+		const slow = window.setTimeout(() => {
+			console.warn(`PDF Wrapper: wrapping ${path} has been running for more than ${SLOW_WRAP_MS / 1000} s; it may be waiting for a prompt.`);
+		}, SLOW_WRAP_MS);
+		try {
+			// Quiet: the Executor would show a notice per failure; the pass shows one summary instead.
+			// skipAfterRun: the pass calls `onWrapped` itself after every wrap.
+			if (!(await this.executor.run([{ type: "wrap", pdfPath: path }], { quiet: true, skipAfterRun: true, onConverted }))) return { kind: "skipped" };
+			return { kind: "wrapped", name };
+		} catch (error) {
+			if (error instanceof WrapIncomplete) return { kind: "incomplete", name, message: error.message };
+			// The note arrived after the snapshot, or another wrap (a click, or "Wrap all") is creating it right now:
+			// someone else is wrapping it, which is what we wanted.
+			if (error instanceof WrapRefusal && (error.reason === "note-exists" || error.reason === "in-flight")) return { kind: "skipped" };
+			if (isTemplateProblem(error)) return { kind: "template-problem", message: error.message };
+			console.error("PDF Wrapper: could not wrap", path, error);
+			return { kind: "failed", message: error instanceof WrapMessage ? error.message : `Failed to wrap ${path}: ${reason(error)}` };
+		} finally {
+			window.clearTimeout(slow);
+		}
+	}
+}
