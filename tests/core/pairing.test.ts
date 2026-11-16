@@ -1,6 +1,6 @@
 import { expect, test } from "vitest";
 import type { MarkedNote } from "../../src/core/model.ts";
-import { findNoteBeside, findPdfBeside, healthyPairs, pairOfNote, pairUp } from "../../src/core/pairing.ts";
+import { findNoteBeside, findPdfBeside, healthyPairs, pairOfNote, pairUp, withoutFile } from "../../src/core/pairing.ts";
 
 const note = (notePath: string, linkedPdf: string | null = null): MarkedNote =>
 	({ notePath, markerLink: linkedPdf, linkedPdf, ownTargets: linkedPdf ? [linkedPdf] : [] });
@@ -73,4 +73,13 @@ test("findNoteBeside", () => {
 	expect(findNoteBeside("b/S.pdf", notes)).toBeNull();
 	expect(findNoteBeside("a/U.pdf", notes)).toBeNull();
 	expect(findNoteBeside("a/S.md", notes)).toBeNull(); // not a PDF
+});
+
+test("withoutFile removes every trace of a deleted file and leaves the rest", () => {
+	const s = { notePaths: ["a/A.md", "a/B.md"], pdfPaths: ["a/A.pdf", "a/B.pdf"], marked: [note("a/A.md"), note("a/B.md", "a/A.pdf")] };
+	expect(withoutFile(s, "a/A.md")).toEqual({ notePaths: ["a/B.md"], pdfPaths: ["a/A.pdf", "a/B.pdf"], marked: [note("a/B.md", "a/A.pdf")] });
+	expect(withoutFile(s, "a/A.pdf")).toEqual({ notePaths: ["a/A.md", "a/B.md"], pdfPaths: ["a/B.pdf"], marked: s.marked });
+	expect(withoutFile(s, "a/Other.md")).toEqual(s);
+	// The snapshot handed in is not changed.
+	expect(s.notePaths).toEqual(["a/A.md", "a/B.md"]);
 });

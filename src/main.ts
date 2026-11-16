@@ -56,7 +56,7 @@ export default class PdfWrapperPlugin extends Plugin {
 				if (isAutoWrapOn(this.app)) autoWrapper.onPdfCreated(path, local);
 			},
 			isListReady: () => store.hasScanned(),
-			listedClaim: (notePath) => store.listedClaim(notePath),
+			listedMarked: (notePath) => store.listedMarked(notePath),
 			refreshSoon: () => refreshSoon(),
 		});
 		watcher.start();

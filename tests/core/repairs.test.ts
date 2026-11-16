@@ -7,6 +7,7 @@ import {
 	bulkWrapChecker,
 	copyCandidates,
 	describeConvert,
+	describeConvertAll,
 	isBulkConvertible,
 	isBulkWrappable,
 	isCurrentItem,
@@ -403,6 +404,13 @@ test("describeConvert says when the note will then have no PDF", () => {
 });
 test("describeConvert is empty for an entry that is not listed in the pairing", () => {
 	expect(describeConvert(notFound("a/N.md"), pairUp(snap([], [])))).toBe("");
+});
+test("describeConvertAll says what the run does to each note, and that no file is moved", () => {
+	expect(describeConvertAll(1)).toBe("Convert 1 document whose PDF is already beside its note. No file is moved or renamed. "
+		+ "In each note: the marker property is set to true, links to the PDF are removed from its other properties, "
+		+ "each embed of the PDF in the text becomes the wrapped-pdf block (a page or size set on the embed is lost), "
+		+ "and each link to it becomes plain text.");
+	expect(describeConvertAll(3)).toMatch(/^Convert 3 documents whose PDF is already beside its note\. /);
 });
 test("isBulkConvertible is true for every links-own-pdf entry whose PDF is beside the note", () => {
 	const linked = { markerLink: "x/Old.pdf", linkedPdf: "x/Old.pdf", ownTargets: ["x/Old.pdf"] };

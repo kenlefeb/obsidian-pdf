@@ -54,3 +54,12 @@ export function healthyPairs(p: Pairing): { notePath: string; pdfPath: string }[
 export function pairOfNote(p: Pairing, notePath: string): Pair | null {
 	return p.pairs.find((pair) => pair.note.notePath === notePath) ?? null;
 }
+
+/** The snapshot with every trace of a deleted file removed, in case the vault or the cache still remembers it. */
+export function withoutFile(snapshot: VaultSnapshot, path: string): VaultSnapshot {
+	return {
+		notePaths: snapshot.notePaths.filter((p) => p !== path),
+		pdfPaths: snapshot.pdfPaths.filter((p) => p !== path),
+		marked: snapshot.marked.filter((note) => note.notePath !== path),
+	};
+}

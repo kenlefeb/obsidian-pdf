@@ -1,6 +1,6 @@
 import type { Plugin } from "obsidian";
-import { healthyPairs } from "../core/classify.ts";
 import { buildExplorerCss } from "../core/explorer-css.ts";
+import { healthyPairs } from "../core/pairing.ts";
 import type { AttentionStore } from "./attention-store.ts";
 
 /** A burst of refreshes produces one rebuild this long after the last one. */
@@ -63,10 +63,10 @@ export function installExplorerStyle(plugin: Plugin, store: AttentionStore, shou
 	let unloaded = false;
 	const apply = () => {
 		timer = null;
-		// Before the first scan the classification is empty, which would only un-hide rows.
+		// Before the first scan the pairing is empty, which would only un-hide rows.
 		if (unloaded || !store.hasScanned()) return;
 		try {
-			style.update(healthyPairs(store.classification()), shouldHide());
+			style.update(healthyPairs(store.pairing()), shouldHide());
 		} catch (error) {
 			console.warn("PDF Wrapper: could not rebuild the file explorer styling; it stays as it was.", error);
 		}

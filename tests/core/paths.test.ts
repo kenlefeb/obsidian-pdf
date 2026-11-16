@@ -1,5 +1,5 @@
 import { expect, test } from "vitest";
-import { basename, dirname, extension, filename, isInFolder, isNote, findPathIgnoringCase, isPdf, joinPath, noteBeside, pdfBeside, samePair } from "../../src/core/paths.ts";
+import { basename, dirname, extension, filename, isInFolder, isLinkSafeName, isNote, findPathIgnoringCase, isPdf, joinPath, noteBeside, pdfBeside, samePair } from "../../src/core/paths.ts";
 
 test("root-level files", () => {
 	expect(dirname("Statement.pdf")).toBe("");
@@ -51,4 +51,11 @@ test("the PDF beside a note and the note beside a PDF", () => {
 	expect(pdfBeside("B.md")).toBe("B.pdf");
 	expect(noteBeside("B.PDF")).toBe("B.md");
 	expect(pdfBeside("a.b/2024.01 Bank.v2.md")).toBe("a.b/2024.01 Bank.v2.pdf");
+});
+
+test("isLinkSafeName flags link metacharacters", () => {
+	expect(isLinkSafeName("a/Statement 2024.pdf")).toBe(true);
+	for (const p of ["a/x[1].pdf", "a/x]y.pdf", "a/x|y.pdf", "a/x#y.pdf", "a/x^y.pdf"]) {
+		expect(isLinkSafeName(p)).toBe(false);
+	}
 });

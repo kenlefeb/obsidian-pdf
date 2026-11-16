@@ -1,14 +1,21 @@
 import { ButtonComponent, Modal, Platform, SuggestModal, type App } from "obsidian";
-import { fixLabel, rowFile, stateLine } from "../core/attention.ts";
-import { candidatesForMissing, fixesFor } from "../core/fixes.ts";
-import type { AttentionItem, FixId } from "../core/types.ts";
+import { repairLabel, rowFile, stateLine } from "../core/list-text.ts";
+import type { ListItem, Pairing, RepairId } from "../core/model.ts";
+import { copyCandidates, describeConvert, describeConvertAll, pdfCandidates, renameCandidates, repairsFor } from "../core/repairs.ts";
 import type { AttentionStore } from "../obsidian/attention-store.ts";
 
-/** The Needs attention list: one row per entry, with a button per fix. Re-renders whenever the store changes. */
+/** The repairs that first ask which PDF: what the chooser says, and the PDFs it offers. */
+const CHOICES: Partial<Record<RepairId, { placeholder: string; candidates: (item: ListItem, pairing: Pairing) => string[] }>> = {
+	"use-pdf": { placeholder: "Choose the PDF for this note", candidates: pdfCandidates },
+	"rename-note-to-pdf": { placeholder: "Choose the PDF whose name this note takes", candidates: renameCandidates },
+	"copy-pdf": { placeholder: "Choose the wrapped document whose PDF is copied", candidates: copyCandidates },
+};
+
+/** The Needs attention list: one row per entry, with a button per repair. Re-renders whenever the store changes. */
 export class AttentionModal extends Modal {
 	private unsubscribe: (() => void) | null = null;
 	private untrack: (() => void) | null = null;
-	/** Fixes clicked here whose task has not settled yet; while any is, every button stays disabled. */
+	/** Repairs clicked here whose task has not settled yet; while any is, every button stays disabled. */
 	private running = 0;
 	/** The check started on open has finished without any check ever completing. */
 	private checkFailed = false;
@@ -57,10 +64,15 @@ export class AttentionModal extends Modal {
 		}
 
 		const counts = this.store.bulkCounts();
-		if (counts.fix > 0 || counts.wrap > 0) {
+		if (counts.convert > 0 || counts.wrap > 0) {
 			const header = contentEl.createDiv({ cls: "pdf-wrapper-attention-header" });
-			if (counts.fix > 0) {
-				new ButtonComponent(header).setButtonText("Fix all").onClick(() => this.busy(() => this.store.fixAll()));
+			if (counts.convert > 0) {
+				// One confirmation for the whole run.
+				new ButtonComponent(header).setButtonText("Convert all").onClick(() => new ConfirmModal(this.app, this.store, {
+					title: "Convert all?",
+					text: describeConvertAll(counts.convert),
+					button: "Convert all",
+				}, () => this.busy(() => this.store.convertAll())).open());
 			}
 			if (counts.wrap > 0) {
 				new ButtonComponent(header).setButtonText("Wrap all").onClick(() => this.busy(() => this.store.wrapAll()));
@@ -72,46 +84,61 @@ export class AttentionModal extends Modal {
 		if (this.running > 0) this.disableButtons();
 	}
 
-	private renderRow(list: HTMLElement, item: AttentionItem): void {
+	private renderRow(list: HTMLElement, item: ListItem): void {
+		const pairing = this.store.pairing();
 		const row = list.createDiv({ cls: "pdf-wrapper-attention-row" });
 		const info = row.createDiv({ cls: "pdf-wrapper-attention-info" });
 		const file = rowFile(item);
 		info.createDiv({ text: file.name, cls: "pdf-wrapper-attention-name" });
 		info.createDiv({ text: file.folder, cls: "pdf-wrapper-attention-folder" });
-		info.createDiv({ text: stateLine(item, this.store.classification()), cls: "pdf-wrapper-attention-state" });
+		info.createDiv({ text: stateLine(item, pairing), cls: "pdf-wrapper-attention-state" });
 
-		const fixes = row.createDiv({ cls: "pdf-wrapper-attention-fixes" });
-		fixesFor(item.kind).forEach((fix, i) => {
-			const button = new ButtonComponent(fixes).setButtonText(fixLabel(fix));
-			if (i === 0) button.setCta();
-			if (fix === "choose-pdf") {
-				const candidates = candidatesForMissing(item, this.store.classification());
-				if (candidates.length === 0) {
-					// eslint-disable-next-line obsidianmd/ui/sentence-case -- "PDFs" is an acronym's plural; the text is the brief's wording.
-					button.setDisabled(true).setTooltip("No candidate PDFs found");
-					// A disabled button gets no hover, and a phone has none: say it in the row too.
-					info.createDiv({ text: "No candidate PDFs found", cls: "pdf-wrapper-attention-hint" });
-					return;
-				}
-				button.onClick(() => new PdfChoiceModal(this.app, this.store, candidates, (pdf) => this.apply(item, fix, pdf)).open());
-			} else if (fix === "delete-pdf") {
-				const path = item.pdfPath ?? "";
-				button.onClick(() => new ConfirmDeleteModal(this.app, this.store, path, () => this.apply(item, fix)).open());
+		const repairs = repairsFor(item, pairing);
+		if (item.kind === "pdf-not-found" && !repairs.includes("use-pdf")) {
+			// Say why "Use a PDF" is not offered; the PDF may simply not have arrived yet.
+			info.createDiv({
+				text: "No unwrapped PDF is in its folder or has its name. It may not have downloaded yet.",
+				cls: "pdf-wrapper-attention-hint",
+			});
+		}
+		const buttons = row.createDiv({ cls: "pdf-wrapper-attention-fixes" });
+		repairs.forEach((repair, i) => {
+			const button = new ButtonComponent(buttons).setButtonText(repairLabel(repair));
+			// Removing the marker is never the suggested way out.
+			if (i === 0 && repair !== "remove-marker") button.setCta();
+			const choice = CHOICES[repair];
+			if (choice !== undefined) {
+				const candidates = choice.candidates(item, pairing);
+				button.onClick(() => new PdfChoiceModal(this.app, this.store, choice.placeholder, candidates,
+					(pdf) => this.apply(item, repair, pdf)).open());
+			} else if (repair === "convert") {
+				button.onClick(() => new ConfirmModal(this.app, this.store, {
+					title: "Convert this note?",
+					text: describeConvert(item, pairing),
+					button: "Convert",
+				}, () => this.apply(item, repair)).open());
+			} else if (repair === "delete-pdf") {
+				button.onClick(() => new ConfirmModal(this.app, this.store, {
+					title: "Delete the PDF?",
+					text: `${item.pdfPath ?? ""} will be deleted, as your "Deleted files" setting says.`,
+					button: "Delete",
+					warning: true,
+				}, () => this.apply(item, repair)).open());
 			} else {
-				button.onClick(() => this.apply(item, fix));
+				button.onClick(() => this.apply(item, repair));
 			}
 		});
 	}
 
-	private apply(item: AttentionItem, fix: FixId, chosenPdf?: string): void {
-		this.busy(() => this.store.applyFix(item, fix, chosenPdf));
+	private apply(item: ListItem, repair: RepairId, chosenPdf?: string): void {
+		this.busy(() => this.store.applyRepair(item, repair, chosenPdf));
 	}
 
 	/** Keeps every button disabled from now until `work` settles, across any re-render in between. */
 	private busy(work: () => Promise<unknown>): void {
 		this.running++;
 		this.disableButtons();
-		work().catch((error: unknown) => console.error("PDF Wrapper: fix failed", error))
+		work().catch((error: unknown) => console.error("PDF Wrapper: repair failed", error))
 			.finally(() => {
 				this.running--;
 				if (this.unsubscribe !== null) this.render();
@@ -129,11 +156,12 @@ class PdfChoiceModal extends SuggestModal<string> {
 	constructor(
 		app: App,
 		private readonly store: AttentionStore,
+		placeholder: string,
 		private readonly candidates: string[],
 		private readonly choose: (pdf: string) => void,
 	) {
 		super(app);
-		this.setPlaceholder("Choose the PDF for this note");
+		this.setPlaceholder(placeholder);
 	}
 
 	onOpen(): void {
@@ -161,24 +189,32 @@ class PdfChoiceModal extends SuggestModal<string> {
 	}
 }
 
-class ConfirmDeleteModal extends Modal {
+/** Asks before a repair runs: says what it will do, with Cancel and a button that goes ahead. */
+class ConfirmModal extends Modal {
 	private untrack: (() => void) | null = null;
 
-	constructor(app: App, private readonly store: AttentionStore, private readonly path: string, private readonly confirm: () => void) {
+	constructor(
+		app: App,
+		private readonly store: AttentionStore,
+		private readonly ask: { title: string; text: string; button: string; warning?: boolean },
+		private readonly confirm: () => void,
+	) {
 		super(app);
 	}
 
 	onOpen(): void {
 		this.untrack = this.store.trackModal(this);
 		if (Platform.isMobile) this.modalEl.addClass("pdf-wrapper-mobile");
-		this.setTitle("Delete the PDF?");
-		this.contentEl.createEl("p", { text: `${this.path} will be deleted, as your "Deleted files" setting says.` });
+		this.setTitle(this.ask.title);
+		this.contentEl.createEl("p", { text: this.ask.text });
 		const buttons = this.contentEl.createDiv({ cls: "pdf-wrapper-confirm-buttons" });
 		new ButtonComponent(buttons).setButtonText("Cancel").onClick(() => this.close());
-		new ButtonComponent(buttons).setButtonText("Delete").setWarning().onClick(() => {
+		const go = new ButtonComponent(buttons).setButtonText(this.ask.button).onClick(() => {
 			this.close();
 			this.confirm();
 		});
+		if (this.ask.warning === true) go.setWarning();
+		else go.setCta();
 	}
 
 	onClose(): void {

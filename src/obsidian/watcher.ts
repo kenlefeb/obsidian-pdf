@@ -1,19 +1,16 @@
 import { Notice, TFile, type CachedMetadata, type Plugin, type TAbstractFile } from "obsidian";
-import { claimChanged } from "../core/claims.ts";
 import { copySourceByText, follow, isCopyLikeName } from "../core/follow.ts";
 import { textLinksToPdf } from "../core/links.ts";
-import { isMarked, isTemplatePath } from "../core/marker.ts";
-import type { FollowEvent, VaultSnapshot } from "../core/model.ts";
-import { findPdfBeside, healthyPairs, pairUp } from "../core/pairing.ts";
+import { isMarked, isTemplatePath, markedChanged } from "../core/marker.ts";
+import type { FollowEvent, MarkedNote, VaultSnapshot } from "../core/model.ts";
+import { findPdfBeside, healthyPairs, pairUp, withoutFile } from "../core/pairing.ts";
 import { basename, dirname, isNote, isPdf } from "../core/paths.ts";
 import type { PdfWrapperSettings } from "../core/settings-data.ts";
 import { PendingCreates, type OwnChanges } from "../core/marks.ts";
 import { waitAtMost, type CappedWait } from "../core/wait.ts";
-import type { NoteClaim } from "../core/types.ts";
 import type { Executor } from "./execute.ts";
 import type { LocalIntent } from "./local-intent.ts";
-import { readClaim } from "./snapshot.ts";
-import { gatherVault, templateLocations } from "./vault-snapshot.ts";
+import { gatherVault, readMarked, templateLocations } from "./vault-snapshot.ts";
 
 /** How long after the last change that needs it the pairs are re-examined. Provisional: not tuned against real sync behaviour. */
 export const SETTLE_MS = 2000;
@@ -49,22 +46,13 @@ export interface WatcherDeps {
 	onPdfCreated: (path: string, local: boolean) => void;
 	/** False until the Needs attention list has been built once; until then a property change needs no refresh. */
 	isListReady: () => boolean;
-	/** The note's claim as the list last saw it, or null when it had none. */
-	listedClaim: (notePath: string) => NoteClaim | null;
+	/** The note as a marked note as the list last saw it, or null when it was not marked. */
+	listedMarked: (notePath: string) => MarkedNote | null;
 	/** Asks for a coalesced refresh of the list and the explorer rules. Only reads the vault. */
 	refreshSoon: () => void;
 }
 
 const reason = (error: unknown): string => (error instanceof Error ? error.message : String(error));
-
-/** The snapshot with every trace of a deleted file removed, in case the vault or the cache still remembers it. */
-function withoutFile(snapshot: VaultSnapshot, path: string): VaultSnapshot {
-	return {
-		notePaths: snapshot.notePaths.filter((p) => p !== path),
-		pdfPaths: snapshot.pdfPaths.filter((p) => p !== path),
-		marked: snapshot.marked.filter((note) => note.notePath !== path),
-	};
-}
 
 /**
  * Follows renames, moves, deletes and copies made inside Obsidian across a pair, by passing each vault event to
@@ -116,9 +104,10 @@ export class Watcher {
 	}
 
 	/**
-	 * A note's frontmatter changed without a rename, create or delete: for example its marker property was deleted in
-	 * the properties panel, or sync delivered a changed claim. Read-only: when the claim differs from the listed one it
-	 * only asks for a refresh, so ordinary typing in a note costs one cache lookup.
+	 * A note changed without a rename, create or delete: for example its marker property was added or deleted in the
+	 * properties panel, or a link to its own PDF was typed into it or taken out. Read-only: when the note's marked
+	 * state, its marker link or its links to its own PDF differ from what the list last saw, it only asks for a
+	 * refresh, so ordinary typing in a note costs a few cache lookups.
 	 *
 	 * The one exception: a note created inside Obsidian moments ago (in `pendingCreates`) is passed to `follow` again
 	 * as that `create`, because its marker was usually not indexed yet when the `create` event was handled. This is
@@ -130,8 +119,10 @@ export class Watcher {
 		if (this.pendingCreates.has(file.path)) this.continueLocalCreate(file.path);
 		if (!isNote(file.path) || !this.deps.isListReady()) return;
 		try {
-			const current = readClaim(this.plugin.app, file, this.deps.getSettings().markerProperty);
-			if (claimChanged(this.deps.listedClaim(file.path), current)) this.deps.refreshSoon();
+			const { app } = this.plugin;
+			const settings = this.deps.getSettings();
+			const current = readMarked(app, file, settings.markerProperty, templateLocations(app, settings));
+			if (markedChanged(this.deps.listedMarked(file.path), current)) this.deps.refreshSoon();
 		} catch (error) {
 			console.error("PDF Wrapper: could not check a changed note", file.path, error);
 		}

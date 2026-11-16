@@ -1,11 +1,9 @@
 import { BLOCK_LANGUAGE } from "./block.ts";
 import { isFree, partnerDestination } from "./follow.ts";
-import { selfLinked } from "./marker.ts";
+import { sameLinks, selfLinked, type OwnLinks } from "./marker.ts";
 import type { FileAction, ListItem, MarkedNote, Pair, Pairing, RepairId, VaultSnapshot } from "./model.ts";
 import { healthyPairs, pairOfNote, pairUp } from "./pairing.ts";
-import { basename, dirname, filename, findPathIgnoringCase, isInFolder, isNote, noteBeside, pairKey, pdfBeside } from "./paths.ts";
-
-type OwnLinks = NonNullable<ListItem["links"]>;
+import { basename, dirname, filename, findPathIgnoringCase, isInFolder, isLinkSafeName, isNote, noteBeside, pairKey, pdfBeside } from "./paths.ts";
 
 function linksOf(note: MarkedNote): OwnLinks {
 	return { markerLink: note.markerLink, linkedPdf: note.linkedPdf, ownTargets: [...note.ownTargets] };
@@ -99,19 +97,6 @@ export function repairsFor(item: ListItem, pairing: Pairing): RepairId[] {
 		case "unwrapped":
 			return ["wrap"];
 	}
-}
-
-function sameSet(a: string[], b: string[]): boolean {
-	const inA = new Set(a);
-	const inB = new Set(b);
-	return inA.size === inB.size && [...inA].every((entry) => inB.has(entry));
-}
-
-/** Own targets are compared as sets: the order they were read in never makes an entry stale. */
-function sameLinks(a: OwnLinks, b: OwnLinks): boolean {
-	return a.markerLink === b.markerLink
-		&& a.linkedPdf === b.linkedPdf
-		&& sameSet(a.ownTargets, b.ownTargets);
 }
 
 /**
@@ -235,6 +220,17 @@ export function planRepair(item: ListItem, repair: RepairId, snapshot: VaultSnap
 	}
 }
 
+/** What converting a note does to it. */
+const CONVERT_STEPS = "the marker property is set to true, links to the PDF are removed from its other properties, "
+	+ `each embed of the PDF in the text becomes the ${BLOCK_LANGUAGE} block (a page or size set on the embed is lost), `
+	+ "and each link to it becomes plain text.";
+
+/** What "Convert all" will do to the `count` entries it covers, shown once before it runs. */
+export function describeConvertAll(count: number): string {
+	return `Convert ${count} ${count === 1 ? "document" : "documents"} whose PDF is already beside its note. `
+		+ `No file is moved or renamed. In each note: ${CONVERT_STEPS}`;
+}
+
 /** What Convert will do to this entry's note, shown before it runs. Empty when the note is not in the pairing. */
 export function describeConvert(item: ListItem, pairing: Pairing): string {
 	const pair = item.kind === "links-own-pdf" && item.notePath !== null ? pairOfNote(pairing, item.notePath) : null;
@@ -244,9 +240,7 @@ export function describeConvert(item: ListItem, pairing: Pairing): string {
 	const from = pdfToMove(pair, pairing);
 	const sentences: string[] = [];
 	if (from !== null) sentences.push(`${from} is moved to ${partnerDestination(notePath, from)}.`);
-	sentences.push(`Convert ${filename(notePath)}: the marker property is set to true, links to the PDF are removed from its other properties, `
-		+ `each embed of the PDF in the text becomes the ${BLOCK_LANGUAGE} block (a page or size set on the embed is lost), `
-		+ "and each link to it becomes plain text.");
+	sentences.push(`Convert ${filename(notePath)}: ${CONVERT_STEPS}`);
 	if (pair.pdfPath !== null && linked !== null) {
 		sentences.push(`${filename(pair.pdfPath)} beside the note is its PDF; ${linked}, which the marker points to, stays where it is and is not wrapped.`);
 	}
@@ -286,11 +280,6 @@ export function autoWrapChecker(snapshot: VaultSnapshot, attachmentFolder: strin
 		&& !linked.has(pdfPath)
 		&& !notes.has(pairKey(pdfPath))
 		&& (attachmentFolder === null || !isInFolder(pdfPath, attachmentFolder));
-}
-
-/** False when the path holds characters that cannot appear in a wikilink target; wrapping refuses such a PDF. */
-function isLinkSafeName(path: string): boolean {
-	return !/[[\]|#^]/.test(path);
 }
 
 /**

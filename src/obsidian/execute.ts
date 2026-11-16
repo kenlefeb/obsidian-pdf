@@ -1,15 +1,10 @@
 import { Notice, type App, type TAbstractFile } from "obsidian";
 import type { OwnChanges } from "../core/marks.ts";
 import type { FileAction } from "../core/model.ts";
-import type { Action } from "../core/types.ts";
 import type { PdfWrapperSettings } from "../core/settings-data.ts";
 import { siblingNotePath, wrapPdf, WrapIncomplete, WrapMessage } from "../pdf-wrapper.ts";
 import { thenHook } from "../core/then-hook.ts";
-import { EmbedUpdateError, writeClaim } from "./snapshot.ts";
 import { BodyConvertError, convertNote } from "./vault-snapshot.ts";
-
-/** The claim-based actions (until they are removed) and the actions of name-independent pairing. */
-type AnyAction = Action | FileAction;
 
 interface RunOptions {
 	quiet?: boolean;
@@ -23,7 +18,7 @@ type Outcome = "done" | "stale";
 
 const reason = (error: unknown): string => (error instanceof Error ? error.message : String(error));
 
-/** Carries out the actions the core returns (`react`, `planFix`, `follow`, `planRepair`), and nothing more. */
+/** Carries out the actions the core returns (`follow`, `planRepair`), and nothing more. */
 export class Executor {
 	constructor(
 		private readonly app: App,
@@ -44,12 +39,12 @@ export class Executor {
 	 * about links the template had put in the new note: that goes to `onConverted`, for the caller to show once for
 	 * its whole run (see `convertedSummary`), or to the console when there is none.
 	 */
-	async run(actions: AnyAction[], options: RunOptions = {}): Promise<boolean> {
+	async run(actions: FileAction[], options: RunOptions = {}): Promise<boolean> {
 		const task = () => this.runAll(actions, options);
 		return options.skipAfterRun === true ? task() : thenHook(task, this.afterRun);
 	}
 
-	private async runAll(actions: AnyAction[], options: RunOptions): Promise<boolean> {
+	private async runAll(actions: FileAction[], options: RunOptions): Promise<boolean> {
 		const quiet = options.quiet === true;
 		for (const action of actions) {
 			let outcome: Outcome;
@@ -64,16 +59,12 @@ export class Executor {
 		return true;
 	}
 
-	private async runOne(action: AnyAction, options: RunOptions): Promise<Outcome> {
+	private async runOne(action: FileAction, options: RunOptions): Promise<Outcome> {
 		switch (action.type) {
 			case "rename":
 				return this.rename(action.from, action.to);
 			case "copy":
 				return this.copy(action.from, action.to);
-			case "setClaim":
-				return this.setClaim(action.notePath, action.pdfPath, action.oldTargets);
-			case "removeClaim":
-				return this.removeClaim(action.notePath);
 			case "removeMarker":
 				return this.removeMarker(action.notePath);
 			case "convert":
@@ -95,7 +86,7 @@ export class Executor {
 		// A rename that only changes letter case may find the source itself at the destination; that does not count.
 		const caseOnly = from.toLowerCase() === to.toLowerCase();
 		if (this.isOccupied(to, caseOnly ? source : null)) throw new Error("a file or folder with that name already exists.");
-		await this.withMark(from, () => this.app.fileManager.renameFile(source, to));
+		await this.withMark(from, "event", () => this.app.fileManager.renameFile(source, to));
 		return "done";
 	}
 
@@ -103,30 +94,7 @@ export class Executor {
 		const source = this.app.vault.getFileByPath(from);
 		if (!source) return "stale";
 		if (this.isOccupied(to, null)) throw new Error("a file or folder with that name already exists.");
-		await this.withMark(to, () => this.app.vault.copy(source, to));
-		return "done";
-	}
-
-	private async setClaim(notePath: string, pdfPath: string, oldTargets: string[]): Promise<Outcome> {
-		const note = this.app.vault.getFileByPath(notePath);
-		if (!note) return "stale";
-		const marker = this.getSettings().markerProperty;
-		try {
-			await writeClaim(this.app, note, marker, pdfPath, oldTargets);
-		} catch (error) {
-			if (!(error instanceof EmbedUpdateError)) throw error;
-			new Notice(`Updated the "${marker}" property of ${notePath}, but could not update its PDF embed: ${error.message}`);
-		}
-		return "done";
-	}
-
-	private async removeClaim(notePath: string): Promise<Outcome> {
-		const note = this.app.vault.getFileByPath(notePath);
-		if (!note) return "stale";
-		const marker = this.getSettings().markerProperty;
-		await this.app.fileManager.processFrontMatter(note, (frontmatter: Record<string, unknown>) => {
-			delete frontmatter[marker];
-		});
+		await this.withMark(to, "event", () => this.app.vault.copy(source, to));
 		return "done";
 	}
 
@@ -134,7 +102,7 @@ export class Executor {
 		const note = this.app.vault.getFileByPath(notePath);
 		if (!note) return "stale";
 		const marker = this.getSettings().markerProperty;
-		await this.whileMarked(notePath, () =>
+		await this.withMark(notePath, "settled", () =>
 			this.app.fileManager.processFrontMatter(note, (frontmatter: Record<string, unknown>) => {
 				delete frontmatter[marker];
 			}));
@@ -145,7 +113,7 @@ export class Executor {
 		const note = this.app.vault.getFileByPath(notePath);
 		// Gone: there is nothing left to convert.
 		if (!note) return "done";
-		await this.whileMarked(notePath, () => convertNote(this.app, note, this.getSettings().markerProperty, ownTargets));
+		await this.withMark(notePath, "settled", () => convertNote(this.app, note, this.getSettings().markerProperty, ownTargets));
 		return "done";
 	}
 
@@ -153,7 +121,7 @@ export class Executor {
 		const file = this.app.vault.getFileByPath(path);
 		// Already gone, for example because its folder was deleted with it.
 		if (!file) return "done";
-		await this.withMark(path, () => this.app.fileManager.trashFile(file));
+		await this.withMark(path, "event", () => this.app.fileManager.trashFile(file));
 		return "done";
 	}
 
@@ -165,42 +133,33 @@ export class Executor {
 			: undefined;
 		const pdf = this.app.vault.getFileByPath(pdfPath);
 		if (!pdf) return "stale";
-		// Released once the wrap settles either way: if Templater created the note elsewhere and it was moved
-		// into place, no create event used the mark, and it must not linger.
-		const release = this.own.mark(siblingNotePath(pdf));
 		try {
-			await wrapPdf(this.app, this.getSettings(), this.saveSettings, pdf, { open: false, onConverted });
+			// Released once the wrap settles either way: if Templater created the note elsewhere and it was moved
+			// into place, no create event used the mark, and it must not linger.
+			await this.withMark(siblingNotePath(pdf), "settled", () =>
+				wrapPdf(this.app, this.getSettings(), this.saveSettings, pdf, { open: false, onConverted }));
 		} catch (error) {
 			// The PDF is wrapped; only a later step failed. Say so and carry on.
 			if (quiet || !(error instanceof WrapIncomplete)) throw error;
 			new Notice(error.message);
-		} finally {
-			release();
 		}
 		return "done";
 	}
 
-	/** Marks `path` as the plugin's own change for the duration of `change`, removing the mark if it fails. */
-	private async withMark<T>(path: string, change: () => Promise<T>): Promise<T> {
-		const release = this.own.mark(path);
-		try {
-			return await change();
-		} catch (error) {
-			release();
-			throw error;
-		}
-	}
-
 	/**
-	 * Marks `path` as the plugin's own change while `change` runs, and removes the mark when it settles: an edit of a
-	 * note's contents fires no create, rename or delete event that would use the mark up.
+	 * Marks `path` as the plugin's own change while `change` runs. With "event", the create, rename or delete event the
+	 * change fires uses the mark up, so it is removed here only if the change fails. With "settled", it is removed when
+	 * the change settles either way: an edit of a note's contents fires no such event.
 	 */
-	private async whileMarked<T>(path: string, change: () => Promise<T>): Promise<T> {
+	private async withMark<T>(path: string, until: "event" | "settled", change: () => Promise<T>): Promise<T> {
 		const release = this.own.mark(path);
+		let failed = true;
 		try {
-			return await change();
+			const result = await change();
+			failed = false;
+			return result;
 		} finally {
-			release();
+			if (failed || until === "settled") release();
 		}
 	}
 
@@ -212,7 +171,7 @@ export class Executor {
 		return this.app.vault.getAllLoadedFiles().some((file) => file !== except && file.path.toLowerCase() === wanted);
 	}
 
-	private failureMessage(action: AnyAction, error: unknown): string {
+	private failureMessage(action: FileAction, error: unknown): string {
 		const why = reason(error);
 		const marker = this.getSettings().markerProperty;
 		switch (action.type) {
@@ -220,10 +179,6 @@ export class Executor {
 				return `Could not rename ${action.from} to ${action.to}: ${why}`;
 			case "copy":
 				return `Could not copy ${action.from} to ${action.to}: ${why}`;
-			case "setClaim":
-				return `Could not update the "${marker}" property of ${action.notePath}: ${why}`;
-			case "removeClaim":
-				return `Could not remove the "${marker}" property from ${action.notePath}: ${why}`;
 			case "removeMarker":
 				return `Could not remove the "${marker}" property from ${action.notePath}: ${why}`;
 			case "convert":

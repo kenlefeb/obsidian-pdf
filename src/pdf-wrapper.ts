@@ -1,8 +1,7 @@
 import { App, normalizePath, Notice, TFile, TFolder, type TAbstractFile } from "obsidian";
 import { BLOCK_LANGUAGE } from "./core/block.ts";
-import { isLinkSafeName } from "./core/claims.ts";
 import { convertedMessage } from "./core/convert.ts";
-import { dirname, findPathIgnoringCase, isNote, joinPath } from "./core/paths.ts";
+import { dirname, findPathIgnoringCase, isLinkSafeName, isNote, joinPath } from "./core/paths.ts";
 import type { PdfWrapperSettings } from "./core/settings-data.ts";
 import { noteExistedMessage, notesAppearedMessage, templaterResult } from "./core/templater-outcome.ts";
 import {

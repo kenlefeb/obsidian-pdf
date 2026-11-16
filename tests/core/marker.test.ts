@@ -1,5 +1,5 @@
 import { expect, test } from "vitest";
-import { isMarked, isTemplatePath, markerLinkTarget, selfLinked } from "../../src/core/marker.ts";
+import { isMarked, isTemplatePath, markedChanged, markerLinkTarget, selfLinked } from "../../src/core/marker.ts";
 import type { MarkedNote } from "../../src/core/model.ts";
 
 test.each([true, "true", "yes", 1, "[[A.pdf]]", ["[[A.pdf]]"]])("marked: %j", (v) => expect(isMarked(v)).toBe(true));
@@ -45,4 +45,21 @@ test("template path with its extension, and the core Templates folder", () => {
 	expect(isTemplatePath("Meta/Other.md", where)).toBe(false);
 	expect(isTemplatePath("Core/x.md", where)).toBe(true);
 	expect(isTemplatePath("Core2/x.md", where)).toBe(false);
+});
+
+test("markedChanged: a note became marked or stopped being marked", () => {
+	const flag: MarkedNote = { notePath: "a/S.md", markerLink: null, linkedPdf: null, ownTargets: [] };
+	expect(markedChanged(null, null)).toBe(false);
+	expect(markedChanged(null, flag)).toBe(true);
+	expect(markedChanged(flag, null)).toBe(true);
+	expect(markedChanged(flag, { ...flag })).toBe(false);
+});
+
+test("markedChanged: the marker link, the PDF it resolves to or the links to the note's own PDF changed", () => {
+	const linked: MarkedNote = { notePath: "a/S.md", markerLink: "S.pdf", linkedPdf: "a/S.pdf", ownTargets: ["S.pdf", "a/S.pdf"] };
+	expect(markedChanged(linked, { ...linked, ownTargets: ["a/S.pdf", "S.pdf"] })).toBe(false); // order does not matter
+	expect(markedChanged(linked, { ...linked, markerLink: "a/S.pdf" })).toBe(true);
+	expect(markedChanged(linked, { ...linked, linkedPdf: null })).toBe(true);
+	expect(markedChanged(linked, { ...linked, ownTargets: ["S.pdf"] })).toBe(true);
+	expect(markedChanged({ ...linked, markerLink: null, linkedPdf: null, ownTargets: [] }, { ...linked, markerLink: null, linkedPdf: null, ownTargets: ["S.pdf"] })).toBe(true);
 });

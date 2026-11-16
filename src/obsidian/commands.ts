@@ -1,5 +1,5 @@
 import { Notice, TFile, type App } from "obsidian";
-import { attentionNotice } from "../core/attention.ts";
+import { listNotice } from "../core/list-text.ts";
 import { isNote, isPdf } from "../core/paths.ts";
 import type PdfWrapperPlugin from "../main.ts";
 import { existingSiblingNote, wrapPdf, WrapMessage } from "../pdf-wrapper.ts";
@@ -93,7 +93,7 @@ export function registerCommands(plugin: PdfWrapperPlugin, deps: CommandDeps): {
 
 /** The startup notice saying how many entries the list has; clicking it opens the list. */
 export function showStartupNotice(count: number, showAttention: () => void): void {
-	const notice = new Notice(attentionNotice(count));
+	const notice = new Notice(listNotice(count));
 	notice.messageEl.addEventListener('click', () => {
 		notice.hide();
 		showAttention();

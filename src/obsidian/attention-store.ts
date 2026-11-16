@@ -1,15 +1,18 @@
 import { Notice, type App } from "obsidian";
 import type PdfWrapperPlugin from "../main.ts";
-import { bulkResultMessage, nextPendingRemoved, noteBesidePdf, noteBesidePdfMessage } from "../core/attention.ts";
-import { classify } from "../core/classify.ts";
-import { buildAttention, bulkWrapChecker, fixesFor, isBulkFixable, isBulkWrappable, planFix } from "../core/fixes.ts";
-import { specificAttachmentFolder } from "../core/settings-data.ts";
-import type { AttentionItem, Classification, FixId, NoteClaim, Snapshot } from "../core/types.ts";
 import { convertedSummary } from "../core/convert.ts";
+import { bulkResultMessage, nextPendingRemoved, noteBesidePdfMessage } from "../core/list-text.ts";
+import type { ListItem, MarkedNote, Pairing, RepairId, VaultSnapshot } from "../core/model.ts";
+import { pairUp } from "../core/pairing.ts";
+import { buildList, bulkWrapChecker, isBulkConvertible, isBulkWrappable, isCurrentItem, noteBesidePdf, planRepair } from "../core/repairs.ts";
+import { specificAttachmentFolder } from "../core/settings-data.ts";
 import { CONVERTED_NOTICE_MS, isTemplateProblem, WrapIncomplete, WrapMessage, WrapRefusal } from "../pdf-wrapper.ts";
 import type { Executor } from "./execute.ts";
-import { gatherSnapshot } from "./snapshot.ts";
+import { gatherVault } from "./vault-snapshot.ts";
 import { SETTLE_MS } from "./watcher.ts";
+
+/** Said when a repair is clicked on an entry that no longer describes the vault; the list is then read again. */
+const ENTRY_CHANGED = "This entry has changed since it was listed. The list has been refreshed.";
 
 /** Obsidian's "Default location for new attachments" value; not in the public type definitions. */
 interface VaultWithConfig {
@@ -27,15 +30,15 @@ export function attachmentFolder(app: App): string | null {
 
 /**
  * Holds the current Needs attention list. A refresh only reads the vault; files change only through
- * `applyFix`, `fixAll` and `wrapAll`, each of which re-plans against a fresh snapshot first.
- * Refreshes and fixes run one at a time, in the order they were asked for.
+ * `applyRepair`, `convertAll` and `wrapAll`, each of which re-plans against a fresh snapshot first.
+ * Refreshes and repairs run one at a time, in the order they were asked for.
  */
 export class AttentionStore {
-	private list: AttentionItem[] = [];
-	private current: Classification = { pairs: [], unwrappedPdfs: [] };
-	/** The claims of `current`, by note path. */
-	private claimsByNote = new Map<string, NoteClaim>();
-	private bulk = { fix: 0, wrap: 0 };
+	private list: ListItem[] = [];
+	private current: Pairing = { pairs: [], unwrappedPdfs: [] };
+	/** The marked notes of `current`, by note path. */
+	private markedByNote = new Map<string, MarkedNote>();
+	private bulk = { convert: 0, wrap: 0 };
 	private chain: Promise<unknown> = Promise.resolve();
 	private readonly listeners = new Set<() => void>();
 	private readonly openModals = new Set<{ close(): void }>();
@@ -77,38 +80,46 @@ export class AttentionStore {
 	 * Rescans, adding `pendingRemoved` to the PDFs kept after their note was deleted (outside Obsidian, with following
 	 * deletes off, or while other notes link to the PDF). Never changes a vault file.
 	 */
-	refresh(pendingRemoved?: string[]): Promise<AttentionItem[]> {
+	refresh(pendingRemoved?: string[]): Promise<ListItem[]> {
 		return this.serial(() => this.rescan(pendingRemoved ?? []), () => this.items());
 	}
 
-	items(): AttentionItem[] {
+	items(): ListItem[] {
 		return [...this.list];
 	}
 
-	classification(): Classification {
+	/** The pairs as of the last refresh. */
+	pairing(): Pairing {
 		return this.current;
 	}
 
-	/** The note's claim as of the last refresh, or null when it had none. */
-	listedClaim(notePath: string): NoteClaim | null {
-		return this.claimsByNote.get(notePath) ?? null;
+	/** The note as a marked note as of the last refresh, or null when it was not marked. */
+	listedMarked(notePath: string): MarkedNote | null {
+		return this.markedByNote.get(notePath) ?? null;
 	}
 
-	/** How many entries "Fix all" and "Wrap all" would cover, as of the last refresh. */
-	bulkCounts(): { fix: number; wrap: number } {
+	/** How many entries "Convert all" and "Wrap all" would cover, as of the last refresh. */
+	bulkCounts(): { convert: number; wrap: number } {
 		return { ...this.bulk };
 	}
 
-	applyFix(item: AttentionItem, fix: FixId, chosenPdf?: string): Promise<void> {
+	/**
+	 * Carries out one repair the user clicked. The entry is checked against a fresh snapshot first: if it no longer
+	 * describes the vault nothing is changed, the user is told and the list is read again.
+	 */
+	applyRepair(item: ListItem, repair: RepairId, chosenPdf?: string): Promise<void> {
 		return this.serial(async () => {
 			let ranActions = false;
 			try {
-				if (fix === "keep-plain" && item.kind === "note-removed" && item.pdfPath !== null) {
-					await this.forgetPending(item.pdfPath);
-					if (this.unloaded) return;
+				const snapshot = this.snapshot();
+				const pairing = pairUp(snapshot);
+				if (!isCurrentItem(item, snapshot, pairing)) {
+					new Notice(ENTRY_CHANGED);
+					await this.rescan([]);
+					return;
 				}
-				if (fix === "delete-pdf" && item.pdfPath !== null) {
-					// The metadata cache (and so `planFix`) can lag a note that has just come back, for example
+				if (repair === "delete-pdf" && item.pdfPath !== null) {
+					// The metadata cache (and so `planRepair`) can lag a note that has just come back, for example
 					// by sync; the vault's file list does not. Never trash a PDF whose note is there.
 					const note = noteBesidePdf(item.pdfPath, this.plugin.app.vault.getFiles().map((f) => f.path));
 					if (note !== null) {
@@ -117,22 +128,29 @@ export class AttentionStore {
 						return;
 					}
 				}
-				const actions = planFix(item, fix, this.snapshot(), chosenPdf);
+				// Planned before anything is saved: no await lies between the snapshot and the plan.
+				const actions = planRepair(item, repair, snapshot, chosenPdf, pairing);
+				if (repair === "keep-plain" && item.kind === "note-removed" && item.pdfPath !== null) {
+					await this.forgetPending(item.pdfPath);
+					if (this.unloaded) return;
+				}
 				ranActions = actions.some((a) => a.type !== "notice");
 				await this.executor.run(actions, { skipAfterRun: true });
 			} catch (error) {
 				// The Executor has already shown a notice naming the file and the reason.
-				console.error("PDF Wrapper: fix failed", item, fix, error);
+				console.error("PDF Wrapper: repair failed", item, repair, error);
 			}
 			await this.rescan([]);
 			if (ranActions) this.scheduleFollowUp();
 		}, () => undefined);
 	}
 
-	/** Applies the default fix to every entry "Fix all" covers. Resolves to the number fixed. */
-	fixAll(): Promise<number> {
-		return this.bulkRun("fix", (item, snapshot, c) =>
-			isBulkFixable(item, snapshot, c) ? fixesFor(item.kind)[0] ?? null : null);
+	/**
+	 * Converts every entry "Convert all" covers: the notes that link to their own PDF and have it beside them, so no
+	 * file is moved. Resolves to the number converted.
+	 */
+	convertAll(): Promise<number> {
+		return this.bulkRun("convert", (item, _snapshot, pairing) => isBulkConvertible(item, pairing) ? "convert" : null);
 	}
 
 	/**
@@ -140,7 +158,7 @@ export class AttentionStore {
 	 * PDFs at the same time, so a PDF another wrap got to first is skipped, not a failure. Resolves to the number wrapped.
 	 */
 	wrapAll(): Promise<number> {
-		return this.bulkRun("wrap", (item, snapshot, c) => isBulkWrappable(item, snapshot, c) ? "wrap" : null);
+		return this.bulkRun("wrap", (item, snapshot, pairing) => isBulkWrappable(item, snapshot, pairing) ? "wrap" : null);
 	}
 
 	onChange(listener: () => void): () => void {
@@ -149,14 +167,14 @@ export class AttentionStore {
 	}
 
 	/**
-	 * Runs `pick`'s fix on each listed entry it accepts, one at a time, re-planning against a fresh snapshot
-	 * each time. Stops at the first failure. Wraps run quietly: a refused wrap (another wrap got there first, or the
+	 * Runs `pick`'s repair on each listed entry it accepts, one at a time, re-planning against a fresh snapshot
+	 * each time; an entry that has changed since it was listed is skipped. Stops at the first failure. Wraps run quietly: a refused wrap (another wrap got there first, or the
 	 * PDF cannot be wrapped) is skipped without a notice, and only another failure (including Templater handing back
 	 * no note) is reported here and stops the run.
 	 */
 	private bulkRun(
-		kind: "fix" | "wrap",
-		pick: (item: AttentionItem, snapshot: Snapshot, c: Classification) => FixId | null,
+		kind: "convert" | "wrap",
+		pick: (item: ListItem, snapshot: VaultSnapshot, pairing: Pairing) => RepairId | null,
 	): Promise<number> {
 		return this.serial(async () => {
 			let done = 0;
@@ -169,16 +187,19 @@ export class AttentionStore {
 				for (const item of [...this.list]) {
 					if (this.unloaded) break;
 					const snapshot = this.snapshot();
-					// Classified once per snapshot, for both the pick and the plan.
-					const c = classify(snapshot);
-					const fix = pick(item, snapshot, c);
-					if (fix === null) continue;
+					// Paired once per snapshot, for both the pick and the plan.
+					const pairing = pairUp(snapshot);
+					const repair = pick(item, snapshot, pairing);
+					if (repair === null) continue;
+					// Nothing to run: the entry has changed since it was listed, or the repair is refused. Skipped, not counted.
+					const actions = planRepair(item, repair, snapshot, undefined, pairing);
+					if (!actions.some((a) => a.type !== "notice")) continue;
 					needRescan = true;
 					let counted = false;
 					try {
 						// False means a file vanished under us: that item is skipped, not counted, and the run goes on.
 						// Only a throw is a failure that stops the run.
-						counted = await this.executor.run(planFix(item, fix, snapshot, undefined, c), {
+						counted = await this.executor.run(actions, {
 							skipAfterRun: true,
 							quiet: kind === "wrap",
 							onConverted: (message) => converted.push(message),
@@ -194,9 +215,9 @@ export class AttentionStore {
 							new Notice(error.message);
 							counted = true;
 						} else {
-							// For a fix the Executor has already shown a notice; a quiet wrap leaves that to us.
+							// For a convert the Executor has already shown a notice; a quiet wrap leaves that to us.
 							if (kind === "wrap") new Notice(wrapFailureMessage(item.pdfPath, error));
-							console.error("PDF Wrapper: bulk fix failed", item, fix, error);
+							console.error("PDF Wrapper: bulk repair failed", item, repair, error);
 							stopped = true;
 							break;
 						}
@@ -210,7 +231,7 @@ export class AttentionStore {
 				}
 			} catch (error) {
 				// Something other than a file action failed, for example reading the vault.
-				console.error("PDF Wrapper: bulk fix failed", error);
+				console.error("PDF Wrapper: bulk repair failed", error);
 				stopped = true;
 				needRescan = true;
 			} finally {
@@ -231,36 +252,35 @@ export class AttentionStore {
 		return run;
 	}
 
-	private snapshot(): Snapshot {
-		return gatherSnapshot(this.plugin.app, this.plugin.settings.markerProperty);
+	private snapshot(): VaultSnapshot {
+		return gatherVault(this.plugin.app, this.plugin.settings);
 	}
 
 	/** Must run inside `serial`. Never throws: a failure is logged and the previous list kept. */
-	private async rescan(added: string[]): Promise<AttentionItem[]> {
+	private async rescan(added: string[]): Promise<ListItem[]> {
 		if (this.unloaded) return this.items();
 		try {
 			const snapshot = this.snapshot();
-			const c = classify(snapshot);
+			const pairing = pairUp(snapshot);
 			const settings = this.plugin.settings;
-			const pending = nextPendingRemoved(settings.pendingRemovedPdfs, added, c.unwrappedPdfs);
+			const pending = nextPendingRemoved(settings.pendingRemovedPdfs, added, pairing.unwrappedPdfs);
 			if (!sameList(pending, settings.pendingRemovedPdfs)) {
 				settings.pendingRemovedPdfs = pending;
 				await this.plugin.saveSettings();
 				if (this.unloaded) return this.items();
 			}
-			this.current = c;
-			this.claimsByNote = new Map(c.pairs.map((pair) => [pair.notePath, pair]));
-			this.list = buildAttention(c, pending, {
+			this.current = pairing;
+			this.markedByNote = new Map(snapshot.marked.map((note) => [note.notePath, note]));
+			this.list = buildList(pairing, pending, attachmentFolder(this.plugin.app), {
 				includeUnwrapped: this.isAutoWrapOn(),
-				attachmentFolder: attachmentFolder(this.plugin.app),
 				notePaths: snapshot.notePaths,
 			});
 			this.scanned = true;
 			this.bulk = {
-				fix: this.list.filter((item) => isBulkFixable(item, snapshot, c)).length,
+				convert: this.list.filter((item) => isBulkConvertible(item, pairing)).length,
 				// The same test "Wrap all" applies to each entry, so the button's presence matches what it would attempt;
 				// indexed once for this snapshot rather than scanning every note for every entry.
-				wrap: this.list.filter(bulkWrapChecker(snapshot, c)).length,
+				wrap: this.list.filter(bulkWrapChecker(snapshot, pairing)).length,
 			};
 		} catch (error) {
 			console.error("PDF Wrapper: could not check wrapped documents", error);
@@ -277,8 +297,8 @@ export class AttentionStore {
 	}
 
 	/**
-	 * The metadata cache can lag behind a fix's frontmatter writes, so the refresh straight after a fix may
-	 * still see the old claim. Look once more after the settle period.
+	 * The metadata cache can lag behind a repair's writes to a note, so the refresh straight after a repair may
+	 * still see the note as it was. Look once more after the settle period.
 	 */
 	private scheduleFollowUp(): void {
 		if (this.unloaded) return;

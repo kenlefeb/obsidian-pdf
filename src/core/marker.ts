@@ -33,6 +33,32 @@ export function selfLinked(note: MarkedNote): boolean {
 	return note.markerLink !== null || note.ownTargets.length > 0;
 }
 
+/** What a marked note links to; compared to tell whether the note has changed since it was last read. */
+export type OwnLinks = Pick<MarkedNote, "markerLink" | "linkedPdf" | "ownTargets">;
+
+function sameSet(a: string[], b: string[]): boolean {
+	const inA = new Set(a);
+	const inB = new Set(b);
+	return inA.size === inB.size && [...inA].every((entry) => inB.has(entry));
+}
+
+/** Own targets are compared as sets: the order they were read in never makes a difference. */
+export function sameLinks(a: OwnLinks, b: OwnLinks): boolean {
+	return a.markerLink === b.markerLink
+		&& a.linkedPdf === b.linkedPdf
+		&& sameSet(a.ownTargets, b.ownTargets);
+}
+
+/**
+ * True when a note, as read now, differs from how the list last saw it: it became marked, stopped being marked, or
+ * its marker link, the PDF that link resolves to, or its links to its own PDF changed. Null means not marked. Used to
+ * skip refreshes for edits that touch none of these.
+ */
+export function markedChanged(listed: MarkedNote | null, current: MarkedNote | null): boolean {
+	if (listed === null || current === null) return listed !== current;
+	return !sameLinks(listed, current);
+}
+
 export interface TemplateLocations {
 	/** The configured template file, with or without ".md". */
 	templatePath: string;
