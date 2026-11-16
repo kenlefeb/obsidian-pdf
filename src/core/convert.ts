@@ -1,6 +1,14 @@
-import { BLOCK_TEXT } from "./block.ts";
+import { BLOCK_LANGUAGE, BLOCK_TEXT } from "./block.ts";
 import { bodyOffset } from "./frontmatter.ts";
 import { filename } from "./paths.ts";
+
+const BOM = "\uFEFF";
+
+/**
+ * A markdown link target longer than this is not parsed, and the link is left as written (a bound on the work per
+ * link, so text with many nested unclosed targets cannot take long).
+ */
+const MAX_TARGET = 2048;
 
 /**
  * Mutates a parsed frontmatter object. Marker -> true. In every other property, a value that is a link to an own
@@ -37,16 +45,23 @@ export function convertProperties(frontmatter: Record<string, unknown>, markerPr
  * Body only (frontmatter untouched). Each embed of an own target becomes BLOCK_TEXT on its own lines; each plain
  * link to one becomes its display text (alias, else the file name). A link is to an own target when its target, with
  * any `#subpath` and `|alias` removed and URL-decoded for markdown links, equals one of `ownTargets` exactly.
- * Fenced code blocks and inline code are not touched; line endings are preserved. Linear in the length of the text.
+ * Fenced code blocks and inline code are not touched; line endings are preserved.
+ *
+ * Converting the result again changes nothing, with one accepted limit: display text that itself holds a link to an
+ * own target (`[see [[A.pdf]]](A.pdf)`) is put back as written, so that inner link is only converted by a second pass.
  */
 export function convertBody(text: string, ownTargets: string[]): { text: string; embeds: number; links: number } {
 	const own = new Set(ownTargets);
-	const offset = bodyOffset(text);
+	let offset = bodyOffset(text);
+	// With no frontmatter a byte order mark is still in front of the first line; it is not part of that line.
+	if (offset === 0 && text.startsWith(BOM)) offset = BOM.length;
 	let out = text.slice(0, offset);
 	let embeds = 0;
 	let links = 0;
 	let fence: { char: string; length: number } | null = null;
-	let lastEol = "\n";
+	// The line ending for a last line that has none: the previous line's, to begin with the first one in the text.
+	const firstNewline = text.indexOf("\n");
+	let lastEol = firstNewline > 0 && text[firstNewline - 1] === "\r" ? "\r\n" : "\n";
 	let lineStart = offset;
 	while (lineStart < text.length) {
 		const newline = text.indexOf("\n", lineStart);
@@ -79,25 +94,32 @@ export function convertedMessage(noteName: string, properties: string[], embeds:
 	if (properties.length > 0) {
 		done.push(`the PDF was taken out of the ${properties.length === 1 ? "property" : "properties"} ${properties.join(", ")}`);
 	}
-	if (embeds > 0) done.push(`${embeds} ${embeds === 1 ? "embed" : "embeds"} of the PDF became the wrapped-pdf block`);
+	if (embeds > 0) done.push(`${embeds} ${embeds === 1 ? "embed" : "embeds"} of the PDF became the ${BLOCK_LANGUAGE} block`);
 	if (links > 0) done.push(`${links} ${links === 1 ? "link" : "links"} to the PDF became plain text`);
 	if (done.length === 0) return null;
 	return `"${noteName}": the template linked the note to its PDF, which a wrapped note must not do. In the note, ${done.join("; ")}. Change the template so that it no longer links to the PDF.`;
 }
 
-/** The link target of a property value that is one link and nothing else (`[[t]]`, `![[t]]`, `[x](t)`, `![x](t)`), else null. */
+/**
+ * The link target of a property value that is one link and nothing else (`[[t]]`, `![[t]]`, `[x](t)`, `![x](t)`),
+ * else null. A value with anything before or after the link is not one.
+ */
 function wholeLinkTarget(value: string): string | null {
 	let v = value.trim();
 	if (v.startsWith("!")) v = v.slice(1);
-	if (v.startsWith("[[") && v.endsWith("]]")) {
-		const inner = v.slice(2, -2);
-		return inner.includes("]") ? null : wikilinkParts(inner).target;
+	if (v.startsWith("[[")) {
+		// A wikilink: its first `]` begins the `]]` that ends the value, and no further `[` is inside.
+		const close = v.indexOf("]");
+		if (close !== v.length - 2 || v[close + 1] !== "]") return null;
+		const inner = v.slice(2, close);
+		return inner.includes("[") ? null : wikilinkParts(inner).target;
 	}
-	if (v.startsWith("[") && v.endsWith(")")) {
-		const middle = v.indexOf("](");
-		return middle < 0 ? null : markdownTarget(v.slice(middle + 2, -1));
-	}
-	return null;
+	if (!v.startsWith("[") || !v.endsWith(")")) return null;
+	// A markdown link: the first `[` closes right before the `(` that closes at the last character.
+	const closeOf = matchClosers(v);
+	const textEnd = closeOf[0] ?? -1;
+	if (textEnd < 0 || v[textEnd + 1] !== "(" || closeOf[textEnd + 1] !== v.length - 1) return null;
+	return markdownTarget(v.slice(textEnd + 2, -1));
 }
 
 /** `folder/A.pdf#page=2|alias` → target `folder/A.pdf`, alias `alias`. A pipe escaped for a table (`\|`) ends the target too. */
@@ -110,15 +132,19 @@ function wikilinkParts(inner: string): { target: string; alias: string } {
 	return { target: target.trim(), alias: pipe < 0 ? "" : inner.slice(pipe + 1).trim() };
 }
 
-/** `<folder/A B.pdf>`, `folder/A%20B.pdf#page=2 "title"` → `folder/A B.pdf`. */
-function markdownTarget(inner: string): string {
-	let target = inner.trim();
-	if (target.startsWith("<")) {
-		const end = target.indexOf(">");
-		target = end < 0 ? target.slice(1) : target.slice(1, end);
-	} else {
-		target = target.split(/\s+/)[0] ?? "";
-	}
+// What may follow a markdown link's target inside the parentheses: nothing, or a title.
+const AFTER_TARGET = /^(?:\s+(?:"[^"]*"|'[^']*'|\([^()]*\)))?$/;
+
+/**
+ * `<folder/A B.pdf>`, `folder/A%20B.pdf#page=2 "title"` → `folder/A B.pdf`. Null when the target is followed by
+ * anything other than a title, or the `>` of the `<…>` form is missing: that is not a link.
+ */
+function markdownTarget(inner: string): string | null {
+	const trimmed = inner.trim();
+	const angled = trimmed.startsWith("<");
+	const end = angled ? trimmed.indexOf(">") : trimmed.search(/\s|$/);
+	if (end < 0 || !AFTER_TARGET.test(trimmed.slice(angled ? end + 1 : end))) return null;
+	let target = trimmed.slice(angled ? 1 : 0, end);
 	const hash = target.indexOf("#");
 	if (hash >= 0) target = target.slice(0, hash);
 	try {
@@ -147,7 +173,8 @@ function closesFence(line: string, fence: { char: string; length: number }): boo
 /**
  * One line outside a fenced code block. `parts` is the line cut at each embed of an own target (one more part than
  * embeds), with each plain link to an own target already replaced by its display text. Inline code and escaped
- * characters are copied as written. Linear in the length of the line.
+ * characters are copied as written. A wikilink to anything else is copied whole, so what follows it is never read
+ * as the target of a markdown link (`[[B.pdf]](A.pdf)` stays as written).
  */
 function scanLine(line: string, own: Set<string>): { parts: string[]; links: number } {
 	if (!line.includes("[")) return { parts: [line], links: 0 };
@@ -155,7 +182,10 @@ function scanLine(line: string, own: Set<string>): { parts: string[]; links: num
 	const closeOf = line.includes("](") ? matchClosers(line) : null;
 	const parts: string[] = [];
 	const unclosedCode = new Set<number>();
+	// The first `]` at or after the last place looked from (-2 before any look, -1 when there is none), and the last
+	// `[` before it: a wikilink's `[[` is the last `[` before its `]]`.
 	let nextBracket = -2;
+	let lastOpen = -1;
 	let buffer = "";
 	let links = 0;
 	let i = 0;
@@ -188,22 +218,28 @@ function scanLine(line: string, own: Set<string>): { parts: string[]; links: num
 		let display = "";
 		if (line[open + 1] === "[") {
 			// Wikilink: no `]` between `[[` and `]]`.
-			if (nextBracket !== -1 && nextBracket < open + 2) nextBracket = line.indexOf("]", open + 2);
-			if (nextBracket >= 0 && line[nextBracket + 1] === "]") {
+			if (nextBracket !== -1 && nextBracket < open + 2) {
+				nextBracket = line.indexOf("]", open + 2);
+				lastOpen = nextBracket < 0 ? -1 : line.lastIndexOf("[", nextBracket);
+			}
+			if (nextBracket >= 0 && line[nextBracket + 1] === "]" && lastOpen === open + 1) {
 				const { target, alias } = wikilinkParts(line.slice(open + 2, nextBracket));
-				if (own.has(target)) {
-					end = nextBracket + 2;
-					display = alias !== "" ? alias : filename(target);
+				if (!own.has(target)) {
+					buffer += line.slice(i, nextBracket + 2);
+					i = nextBracket + 2;
+					continue;
 				}
+				end = nextBracket + 2;
+				display = alias !== "" ? alias : filename(target);
 			}
 		}
 		if (end < 0 && closeOf !== null) {
 			// Markdown link: `[text](target)`, the text's brackets and the target's parentheses balanced.
 			const textEnd = closeOf[open] ?? -1;
 			const targetEnd = textEnd >= 0 && line[textEnd + 1] === "(" ? (closeOf[textEnd + 1] ?? -1) : -1;
-			if (targetEnd >= 0) {
+			if (targetEnd >= 0 && targetEnd - textEnd - 2 <= MAX_TARGET) {
 				const target = markdownTarget(line.slice(textEnd + 2, targetEnd));
-				if (own.has(target)) {
+				if (target !== null && own.has(target)) {
 					end = targetEnd + 1;
 					const text = line.slice(open + 1, textEnd).trim();
 					display = text !== "" ? text : filename(target);

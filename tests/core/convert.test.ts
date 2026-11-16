@@ -85,11 +85,66 @@ test("body: an escaped bracket is not a link; an unfinished link is left as writ
 	expect(convertBody(text, ["A.pdf"])).toEqual({ text, embeds: 0, links: 0 });
 });
 
-test("body: a long line of brackets is handled quickly", () => {
-	const text = "[".repeat(200000) + "(".repeat(200000) + "`".repeat(3) + "x\n";
-	const started = Date.now();
+test("body: pathological lines come back unchanged (bounded work; a slow scan would time this test out)", () => {
+	const brackets = "[".repeat(200000) + "(".repeat(200000) + "`".repeat(3) + "x\n";
+	expect(convertBody(brackets, ["A.pdf"]).text).toBe(brackets);
+	const nested = "[a](b ".repeat(40000) + ")".repeat(40000) + "\n";
+	expect(convertBody(nested, ["A.pdf"]).text).toBe(nested);
+	expect(convertBody(nested, ["b"]).text).toBe("[a](b ".repeat(39999) + "a" + ")".repeat(39999) + "\n");
+	const wiki = "[".repeat(200000) + "]]\n";
+	expect(convertBody(wiki, ["A.pdf"]).text).toBe(wiki);
+});
+
+test("body: a markdown target longer than the bound is left as written", () => {
+	const long = "x".repeat(3000);
+	const text = `[a](${long}) [b](A.pdf)\n`;
+	expect(convertBody(text, [long, "A.pdf"])).toEqual({ text: `[a](${long}) b\n`, embeds: 0, links: 1 });
+});
+
+test("body: a wikilink to another file followed by (own target) is left as written", () => {
+	for (const text of ["See [[B.pdf]](A.pdf) end\n", "![[B.pdf]](A.pdf)\n", "[[B.pdf|x]](A.pdf)\n"]) {
+		expect(convertBody(text, ["A.pdf"])).toEqual({ text, embeds: 0, links: 0 });
+	}
+	expect(convertBody("[[[A.pdf]] [[B.pdf]] [[A.pdf]]\n", ["A.pdf"]).text).toBe("[A.pdf [[B.pdf]] A.pdf\n");
+});
+
+test("body: <target> followed by anything but a title is not a link to it", () => {
+	expect(convertBody("[x](A.pdf junk) [y](A.pdf 't') [z](A.pdf (t))\n", ["A.pdf"]).text).toBe("[x](A.pdf junk) y z\n");
+	expect(convertBody("[x](<A.pdf> junk) [y](<A.pdf> \"t\") [z](<A.pdf)\n", ["A.pdf"]).text).toBe("[x](<A.pdf> junk) y [z](<A.pdf)\n");
+});
+
+test("properties: a value with more than the link is kept", () => {
+	const fm: Record<string, unknown> = {
+		a: "[draft] see [scan](A.pdf)",
+		b: "[x](<A.pdf>) text (y)",
+		c: "[[B.pdf]](A.pdf)",
+		d: "[[A.pdf]] and [[A.pdf]]",
+		e: "[x](<A.pdf> junk)",
+		f: ["[[B.pdf]](A.pdf)", "[x](<A.pdf> \"t\")", "[a [b]](A.pdf)"],
+	};
+	const before = { ...fm, f: ["[[B.pdf]](A.pdf)"] };
+	expect(convertProperties(fm, "wrapped-pdf", ["A.pdf"])).toEqual(["f"]);
+	expect(fm).toEqual({ ...before, "wrapped-pdf": true });
+});
+
+test("body: a CRLF file with a one-line body gets a CRLF block", () => {
+	expect(convertBody("---\r\nx: 1\r\n---\r\n![[A.pdf]]", ["A.pdf"]).text).toBe("---\r\nx: 1\r\n---\r\n```wrapped-pdf\r\n```");
+});
+
+test("body: a byte order mark does not hide a fence on the first line", () => {
+	const text = "\uFEFF```\n![[A.pdf]]\n```\n";
 	expect(convertBody(text, ["A.pdf"]).text).toBe(text);
-	expect(Date.now() - started).toBeLessThan(2000);
+	expect(convertBody("\uFEFF![[A.pdf]]\n", ["A.pdf"]).text).toBe("\uFEFF```wrapped-pdf\n```\n");
+});
+
+test("body: converting twice changes nothing more", () => {
+	const once = convertBody("---\nx: 1\n---\n\n![[A.pdf#page=3]]\n\nSee [[A.pdf|the scan]] and [[A.pdf]] and [[B.pdf]].\nbefore ![[A.pdf]] after\n", ["A.pdf"]);
+	expect(convertBody(once.text, ["A.pdf"])).toEqual({ text: once.text, embeds: 0, links: 0 });
+	// Accepted limit: display text that itself holds a link to an own target is put back as written, so that inner
+	// link takes a second pass.
+	const nested = convertBody("[see [[A.pdf]]](A.pdf)\n", ["A.pdf"]);
+	expect(nested.text).toBe("see [[A.pdf]]\n");
+	expect(convertBody(nested.text, ["A.pdf"]).text).toBe("see A.pdf\n");
 });
 
 test("message: names the note, the properties and the counts", () => {
