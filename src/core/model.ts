@@ -59,6 +59,11 @@ export interface ListItem {
 	kind: ListKind;
 	notePath: string | null;
 	pdfPath: string | null;
+	/**
+	 * Only for links-own-pdf: what the note linked to when it was listed, so a repair can tell that it has changed
+	 * since.
+	 */
+	links?: Pick<MarkedNote, "markerLink" | "linkedPdf" | "ownTargets">;
 }
 
 export type RepairId = "use-pdf" | "rename-note-to-pdf" | "copy-pdf" | "remove-marker"

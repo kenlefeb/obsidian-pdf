@@ -4,6 +4,7 @@ import {
 	AUTO_WRAP_OUTSIDE_JITTER_MS,
 	AUTO_WRAP_OUTSIDE_SETTLE_MS,
 	autoWrapDueAt,
+	heldForArrivingNote,
 	pausedMessage,
 	pausesAutoWrap,
 	planAutoWrap,
@@ -11,6 +12,8 @@ import {
 	summarizeWraps,
 	type WrapOutcome,
 } from '../../src/core/auto-wrap.ts';
+import type { MarkedNote } from '../../src/core/model.ts';
+import { pairUp } from '../../src/core/pairing.ts';
 import type { NoteClaim, Snapshot } from '../../src/core/types.ts';
 
 const snap = (notePaths: string[], pdfPaths: string[], claims: NoteClaim[] = []): Snapshot => ({ notePaths, pdfPaths, claims });
@@ -147,4 +150,27 @@ test('a pass that paused shows the paused notice once, after the wraps before it
 		.toEqual(['Wrapped A', `Automatic wrapping paused: ${TEMPLATE_FAILED} ${PAUSE_TAIL}`]);
 	expect(summarizeWraps([{ kind: 'template-problem', message: TEMPLATE_FAILED }]))
 		.toEqual([`Automatic wrapping paused: ${TEMPLATE_FAILED} ${PAUSE_TAIL}`]);
+});
+
+// heldForArrivingNote: a PDF from outside is not wrapped while it may be half of a pair still arriving.
+const marked = (notePath: string): MarkedNote => ({ notePath, markerLink: null, linkedPdf: null, ownTargets: [] });
+const pairing = (notes: string[], pdfPaths: string[]) => pairUp({ notePaths: notes, pdfPaths, marked: notes.map(marked) });
+
+test('heldForArrivingNote holds a PDF while a marked note in its folder has no PDF (a rename in transit)', () => {
+	expect(heldForArrivingNote('a/New.pdf', pairing(['a/Old.md'], ['a/New.pdf']))).toBe(true);
+	expect(heldForArrivingNote('New.pdf', pairing(['Old.md'], ['New.pdf']))).toBe(true);
+});
+test('heldForArrivingNote holds a PDF while a marked note of its name elsewhere has no PDF (a move in transit)', () => {
+	expect(heldForArrivingNote('b/S.pdf', pairing(['a/S.md'], ['b/S.pdf']))).toBe(true);
+	expect(heldForArrivingNote('b/S.PDF', pairing(['a/deep/S.md'], ['b/S.PDF']))).toBe(true);
+});
+test('heldForArrivingNote does not hold a PDF for a note elsewhere under another name, or with no marked notes', () => {
+	expect(heldForArrivingNote('b/S.pdf', pairing(['a/T.md'], ['b/S.pdf']))).toBe(false);
+	expect(heldForArrivingNote('b/S.pdf', pairing(['bb/T.md'], ['b/S.pdf']))).toBe(false); // a folder whose name only starts the same
+	expect(heldForArrivingNote('b/S.pdf', pairing(['b/deep/T.md'], ['b/S.pdf']))).toBe(false); // a subfolder is not the same folder
+	expect(heldForArrivingNote('b/S.pdf', pairing([], ['b/S.pdf']))).toBe(false);
+});
+test('heldForArrivingNote does not hold a PDF when that marked note has its PDF', () => {
+	expect(heldForArrivingNote('a/New.pdf', pairing(['a/Old.md'], ['a/Old.pdf', 'a/New.pdf']))).toBe(false);
+	expect(heldForArrivingNote('b/S.pdf', pairing(['a/S.md'], ['a/S.pdf', 'b/S.pdf']))).toBe(false);
 });

@@ -16,7 +16,7 @@ function ownExtension(path: string): string {
 }
 
 /** Where the partner of `anchor` must live to pair with it, keeping the partner's own spelling of its extension. */
-function partnerDestination(anchor: string, partner: string): string {
+export function partnerDestination(anchor: string, partner: string): string {
 	return joinPath(dirname(anchor), `${basename(anchor)}.${ownExtension(partner)}`);
 }
 
@@ -24,7 +24,7 @@ function partnerDestination(anchor: string, partner: string): string {
  * Free means in neither list ignoring letter case. `exempt` (the partner being renamed) does not count against
  * itself; null exempts nothing.
  */
-function isFree(path: string, exempt: string | null, snapshot: VaultSnapshot): boolean {
+export function isFree(path: string, exempt: string | null, snapshot: VaultSnapshot): boolean {
 	const wanted = path.toLowerCase();
 	return ![...snapshot.pdfPaths, ...snapshot.notePaths].some((p) => p !== exempt && p.toLowerCase() === wanted);
 }

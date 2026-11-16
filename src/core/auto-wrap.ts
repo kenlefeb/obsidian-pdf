@@ -1,3 +1,5 @@
+import type { Pairing } from "./model.ts";
+import { basename, dirname } from "./paths.ts";
 import { autoWrapChecker } from "./react.ts";
 import type { Snapshot } from "./types.ts";
 
@@ -57,6 +59,18 @@ export function planAutoWrap(
 		}
 	}
 	return plan;
+}
+
+/**
+ * True when an outside-arrived PDF must not be wrapped automatically: a marked note with no PDF is in the same folder
+ * (a rename in transit), or has the same base name anywhere (a move in transit). That is what a pair looks like on a
+ * second device while its PDF has arrived and its note has not; wrapping it would make a second note.
+ */
+export function heldForArrivingNote(pdfPath: string, pairing: Pairing): boolean {
+	const folder = dirname(pdfPath);
+	const name = basename(pdfPath);
+	return pairing.pairs.some((pair) => pair.pdfPath === null
+		&& (dirname(pair.note.notePath) === folder || basename(pair.note.notePath) === name));
 }
 
 /**
