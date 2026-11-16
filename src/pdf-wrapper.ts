@@ -1,5 +1,7 @@
 import { App, normalizePath, Notice, TFile, TFolder, type TAbstractFile } from "obsidian";
+import { BLOCK_LANGUAGE } from "./core/block.ts";
 import { isLinkSafeName } from "./core/claims.ts";
+import { convertedMessage } from "./core/convert.ts";
 import { dirname, findPathIgnoringCase, isNote, joinPath } from "./core/paths.ts";
 import type { PdfWrapperSettings } from "./core/settings-data.ts";
 import { noteExistedMessage, notesAppearedMessage, templaterResult } from "./core/templater-outcome.ts";
@@ -8,8 +10,9 @@ import {
 	defaultTemplatePath,
 	ensureTemplateComponents,
 	templatePathWithExtension,
+	type TemplateCheck,
 } from "./core/template.ts";
-import { EmbedUpdateError, writeClaim } from "./obsidian/snapshot.ts";
+import { BodyConvertError, convertNote, ownTargetsFor } from "./obsidian/vault-snapshot.ts";
 
 /** A wrap outcome whose message is complete and is shown as it is, without a "Failed to wrap" prefix. */
 export class WrapMessage extends Error {
@@ -44,7 +47,7 @@ export function isTemplateProblem(error: unknown): error is WrapRefusal {
 	return error instanceof WrapRefusal && (error.reason === "template-failed" || error.reason === "template-unclear");
 }
 
-/** The note was created and carries the claim, so the PDF is wrapped, but a later step failed. */
+/** The note was created and carries the marker, so the PDF is wrapped, but a later step failed. */
 export class WrapIncomplete extends WrapMessage {
 	constructor(message: string, readonly note: TFile) {
 		super(message);
@@ -100,9 +103,10 @@ export function existingSiblingNote(app: App, pdf: TFile, notePath: string = sib
 }
 
 /**
- * Creates `<name>.md` beside the PDF from the template and marks it with the claim.
- * The PDF is not moved. Throws a WrapRefusal when it refuses before creating a note, a WrapIncomplete
- * when the PDF is wrapped but a later step failed, and an Error describing what was left behind otherwise.
+ * Creates `<name>.md` beside the PDF from the template, sets its marker to `true` and takes out of it any link to the
+ * PDF that the template put there (the note must not name its PDF). The PDF is not moved. Throws a WrapRefusal when
+ * it refuses before creating a note, a WrapIncomplete when the PDF is wrapped but a later step failed, and an Error
+ * describing what was left behind otherwise.
  */
 export async function wrapPdf(
 	app: App,
@@ -165,22 +169,29 @@ async function wrapOnce(
 	}
 
 	const note = created.file;
+	let converted: Awaited<ReturnType<typeof convertNote>>;
 	try {
 		if (note.path !== notePath) {
 			// Only for a note Templater returned (a found note is at `notePath`, and the plugin creates its own there):
 			// the template renamed or moved it, so put it back beside the PDF.
 			await app.fileManager.renameFile(note, notePath);
 		}
-		await writeClaim(app, note, settings.markerProperty, pdfFile.path, [pdfFile.name, pdfFile.basename]);
+		// As Convert would: whatever the template made of the note, it ends marked and without a link to its PDF.
+		converted = await convertNote(app, note, settings.markerProperty, ownTargetsFor(app, note, pdfFile));
 	} catch (e) {
-		if (e instanceof EmbedUpdateError) {
+		if (e instanceof BodyConvertError) {
 			const done = created.made ? "Created and marked" : "Marked";
-			throw new WrapIncomplete(`${done} ${note.path}, but could not update its PDF embed: ${reason(e)}.`, note);
+			throw new WrapIncomplete(
+				`${done} ${note.path}, but could not replace the links to ${pdfFile.name} in its text: ${reason(e)}.`,
+				note,
+			);
 		}
 		throw created.made
 			? notMarked(note.path, pdfFile, settings.markerProperty, e)
 			: notMarkedFound(note.path, pdfFile, settings.markerProperty, e);
 	}
+	const removed = convertedMessage(note.basename, converted.properties, converted.embeds, converted.links);
+	if (removed !== null) new Notice(removed, CONVERTED_NOTICE_MS);
 
 	if (options.open) {
 		try {
@@ -198,8 +209,11 @@ function refuseIfNoteExists(app: App, pdfFile: TFile, notePath: string): void {
 	if (occupied) throw new WrapRefusal(noteExistedMessage(pdfFile.name, occupied, []), "note-exists");
 }
 
+/** How long the message about links the template put in stays up: it is long, and asks the user to change the template. */
+const CONVERTED_NOTICE_MS = 15000;
+
 /**
- * The note this wrap made (Templater handed it back, or the plugin created it) exists but carries no claim. It is not
+ * The note this wrap made (Templater handed it back, or the plugin created it) exists but carries no marker. It is not
  * deleted: the message tells the user what to do.
  */
 function notMarked(notePath: string, pdfFile: TFile, markerProperty: string, e: unknown): Error {
@@ -222,7 +236,8 @@ function notMarkedFound(notePath: string, pdfFile: TFile, markerProperty: string
 
 /**
  * Returns the template file, creating the default when none is configured or the configured file is
- * missing, and adding the marker property or PDF embed when the template lacks them.
+ * missing, and bringing the template to the current form when it lacks the marker property or the block, or still
+ * has the placeholder link or embed of the earlier format (text-level edits only; see `ensureTemplateComponents`).
  * Throws an Error whose message names the path and the reason.
  */
 export async function prepareTemplate(
@@ -265,26 +280,33 @@ export async function prepareTemplate(
 		}
 	}
 
-	let added: ("marker" | "embed")[] = [];
+	let changes: string[] = [];
 	try {
 		// Read first so an intact template is not rewritten; the change itself is computed inside process.
-		if (ensureTemplateComponents(await app.vault.read(file), settings.markerProperty).added.length > 0) {
+		const current = await app.vault.read(file);
+		if (ensureTemplateComponents(current, settings.markerProperty).text !== current) {
 			await app.vault.process(file, (text) => {
 				const check = ensureTemplateComponents(text, settings.markerProperty);
-				added = check.added;
+				changes = templateChanges(check, settings.markerProperty);
 				return check.text;
 			});
 		}
 	} catch (e) {
 		throw new Error(`Could not update the template ${path}: ${reason(e)}.`);
 	}
-	if (added.length > 0) {
-		const parts = added.map((part) =>
-			part === "marker" ? `the marker property "${settings.markerProperty}"` : "a PDF embed");
-		new Notice(`Updated the template ${path}: added ${parts.join(" and ")}.`);
-	}
+	if (changes.length > 0) new Notice(`Updated the template ${path}: ${changes.join("; ")}.`);
 
 	return file;
+}
+
+/** What a template check changed, as phrases for the notice. */
+function templateChanges(check: TemplateCheck, markerProperty: string): string[] {
+	const changes: string[] = [];
+	if (check.added.includes("marker")) changes.push(`added the marker property "${markerProperty}"`);
+	if (check.markerSet) changes.push(`set the marker property "${markerProperty}" to true`);
+	if (check.replacedEmbed) changes.push(`replaced the PDF embed with the ${BLOCK_LANGUAGE} block, which shows the PDF beside the note`);
+	if (check.added.includes("block")) changes.push(`added the ${BLOCK_LANGUAGE} block, which shows the PDF beside the note`);
+	return changes;
 }
 
 function asTemplateFile(file: TAbstractFile, path: string): TFile {
@@ -318,7 +340,7 @@ function reason(e: unknown): string {
 }
 
 /** Templater's template folder setting, or null when Templater is absent or the value is unusable. */
-function getTemplaterFolder(app: App): string | null {
+export function getTemplaterFolder(app: App): string | null {
 	try {
 		const plugins = (app as unknown as { plugins?: { plugins?: Record<string, unknown> } }).plugins?.plugins;
 		const plugin = plugins?.["templater-obsidian"] as { settings?: { templates_folder?: unknown } } | undefined;
@@ -333,7 +355,7 @@ function getTemplaterFolder(app: App): string | null {
 }
 
 /** The core Templates plugin's folder setting, or null when it is absent or the value is unusable. */
-function getCoreTemplatesFolder(app: App): string | null {
+export function getCoreTemplatesFolder(app: App): string | null {
 	try {
 		const folder = getCoreTemplatesPlugin(app)?.instance?.options?.folder;
 		if (typeof folder === "string") return folder;

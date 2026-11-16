@@ -1,17 +1,22 @@
 import { Notice, type App, type TAbstractFile } from "obsidian";
 import type { OwnChanges } from "../core/marks.ts";
+import type { FileAction } from "../core/model.ts";
 import type { Action } from "../core/types.ts";
 import type { PdfWrapperSettings } from "../core/settings-data.ts";
 import { siblingNotePath, wrapPdf, WrapIncomplete, WrapMessage } from "../pdf-wrapper.ts";
 import { thenHook } from "../core/then-hook.ts";
 import { EmbedUpdateError, writeClaim } from "./snapshot.ts";
+import { convertNote } from "./vault-snapshot.ts";
+
+/** The claim-based actions (until they are removed) and the actions of name-independent pairing. */
+type AnyAction = Action | FileAction;
 
 /** What became of one action: carried out, or skipped because a file it needs is no longer there. */
 type Outcome = "done" | "stale";
 
 const reason = (error: unknown): string => (error instanceof Error ? error.message : String(error));
 
-/** Carries out the actions `react` and `planFix` return, and nothing more. */
+/** Carries out the actions the core returns (`react`, `planFix`, `follow`, `planRepair`), and nothing more. */
 export class Executor {
 	constructor(
 		private readonly app: App,
@@ -30,12 +35,12 @@ export class Executor {
 	 * With `quiet`, a `wrap` action (and only that) shows no Notice of its own: its failure, and a WrapIncomplete
 	 * (the PDF is wrapped but a later step failed), are thrown for the caller to report.
 	 */
-	async run(actions: Action[], options: { quiet?: boolean; skipAfterRun?: boolean } = {}): Promise<boolean> {
+	async run(actions: AnyAction[], options: { quiet?: boolean; skipAfterRun?: boolean } = {}): Promise<boolean> {
 		const task = () => this.runAll(actions, options.quiet === true);
 		return options.skipAfterRun === true ? task() : thenHook(task, this.afterRun);
 	}
 
-	private async runAll(actions: Action[], quiet: boolean): Promise<boolean> {
+	private async runAll(actions: AnyAction[], quiet: boolean): Promise<boolean> {
 		for (const action of actions) {
 			let outcome: Outcome;
 			try {
@@ -49,7 +54,7 @@ export class Executor {
 		return true;
 	}
 
-	private async runOne(action: Action, quiet: boolean): Promise<Outcome> {
+	private async runOne(action: AnyAction, quiet: boolean): Promise<Outcome> {
 		switch (action.type) {
 			case "rename":
 				return this.rename(action.from, action.to);
@@ -59,6 +64,10 @@ export class Executor {
 				return this.setClaim(action.notePath, action.pdfPath, action.oldTargets);
 			case "removeClaim":
 				return this.removeClaim(action.notePath);
+			case "removeMarker":
+				return this.removeMarker(action.notePath);
+			case "convert":
+				return this.convert(action.notePath, action.ownTargets);
 			case "delete":
 				return this.delete(action.path);
 			case "wrap":
@@ -111,6 +120,25 @@ export class Executor {
 		return "done";
 	}
 
+	private async removeMarker(notePath: string): Promise<Outcome> {
+		const note = this.app.vault.getFileByPath(notePath);
+		if (!note) return "stale";
+		const marker = this.getSettings().markerProperty;
+		await this.whileMarked(notePath, () =>
+			this.app.fileManager.processFrontMatter(note, (frontmatter: Record<string, unknown>) => {
+				delete frontmatter[marker];
+			}));
+		return "done";
+	}
+
+	private async convert(notePath: string, ownTargets: string[]): Promise<Outcome> {
+		const note = this.app.vault.getFileByPath(notePath);
+		// Gone: there is nothing left to convert.
+		if (!note) return "done";
+		await this.whileMarked(notePath, () => convertNote(this.app, note, this.getSettings().markerProperty, ownTargets));
+		return "done";
+	}
+
 	private async delete(path: string): Promise<Outcome> {
 		const file = this.app.vault.getFileByPath(path);
 		// Already gone, for example because its folder was deleted with it.
@@ -148,6 +176,19 @@ export class Executor {
 		}
 	}
 
+	/**
+	 * Marks `path` as the plugin's own change while `change` runs, and removes the mark when it settles: an edit of a
+	 * note's contents fires no create, rename or delete event that would use the mark up.
+	 */
+	private async whileMarked<T>(path: string, change: () => Promise<T>): Promise<T> {
+		const release = this.own.mark(path);
+		try {
+			return await change();
+		} finally {
+			release();
+		}
+	}
+
 	/** True when a file or folder other than `except` is at `path`, ignoring letter case as a case-insensitive file system would. */
 	private isOccupied(path: string, except: TAbstractFile | null): boolean {
 		const exact = this.app.vault.getAbstractFileByPath(path);
@@ -156,7 +197,7 @@ export class Executor {
 		return this.app.vault.getAllLoadedFiles().some((file) => file !== except && file.path.toLowerCase() === wanted);
 	}
 
-	private failureMessage(action: Action, error: unknown): string {
+	private failureMessage(action: AnyAction, error: unknown): string {
 		const why = reason(error);
 		const marker = this.getSettings().markerProperty;
 		switch (action.type) {
@@ -168,6 +209,10 @@ export class Executor {
 				return `Could not update the "${marker}" property of ${action.notePath}: ${why}`;
 			case "removeClaim":
 				return `Could not remove the "${marker}" property from ${action.notePath}: ${why}`;
+			case "removeMarker":
+				return `Could not remove the "${marker}" property from ${action.notePath}: ${why}`;
+			case "convert":
+				return `Could not convert ${action.notePath}: ${why}`;
 			case "delete":
 				return `Could not delete ${action.path}: ${why}`;
 			case "wrap":
