@@ -1,6 +1,7 @@
 import { Notice, type App } from "obsidian";
 import {
 	autoWrapDueAt,
+	heldMessage,
 	pausesAutoWrap,
 	planAutoWrap,
 	stoppedMessage,
@@ -44,7 +45,7 @@ const SLOW_WRAP_MS = 60000;
  * the one before finished. Notices are summarised once per pass. Call `unload()` when the plugin unloads.
  *
  * A PDF from outside is not wrapped, and not tried again, if a marked note without a PDF may be its note still
- * arriving when it comes due (`heldForArrivingNote`): it stays listed as "Not wrapped".
+ * arriving when it comes due (`arrivingNoteFor`): it stays listed as "Not wrapped", and one console line says why.
  *
  * When Templater hands back no note (the template failed, its prompt was cancelled, or notes appeared elsewhere that
  * are only named), the pass pauses: the PDFs waiting then are held, not tried again until some later wrap succeeds
@@ -145,6 +146,7 @@ export class AutoWrapper {
 				const pending = [...this.pending].map(([path, { due, origin }]) => ({ path, due, origin }));
 				const plan = planAutoWrap(pending, Date.now(), snapshot, this.attachmentFolder());
 				for (const path of plan.drop) this.pending.delete(path);
+				for (const { pdfPath, notePath } of plan.held) console.warn(`PDF Wrapper: ${heldMessage(pdfPath, notePath)}`);
 				const next = plan.wrap[0];
 				if (next === undefined) {
 					this.scheduleAt(plan.waitUntil);

@@ -110,6 +110,8 @@ export class AttentionStore {
 	applyRepair(item: ListItem, repair: RepairId, chosenPdf?: string): Promise<void> {
 		return this.serial(async () => {
 			let ranActions = false;
+			// True once the Executor has the plan: it shows a notice of its own for whatever fails from then on.
+			let handedOver = false;
 			try {
 				const snapshot = this.snapshot();
 				const pairing = pairUp(snapshot);
@@ -135,9 +137,11 @@ export class AttentionStore {
 					if (this.unloaded) return;
 				}
 				ranActions = actions.some((a) => a.type !== "notice");
+				handedOver = true;
 				await this.executor.run(actions, { skipAfterRun: true });
 			} catch (error) {
-				// The Executor has already shown a notice naming the file and the reason.
+				// Failed before any file was touched (reading the vault, planning, saving the settings): say so here.
+				if (!handedOver && !this.unloaded) new Notice(repairFailedMessage(error));
 				console.error("PDF Wrapper: repair failed", item, repair, error);
 			}
 			await this.rescan([]);
@@ -355,6 +359,11 @@ export class AttentionStore {
 function wrapFailureMessage(pdfPath: string | null, error: unknown): string {
 	if (error instanceof WrapMessage) return error.message;
 	return `Failed to wrap ${pdfPath ?? "a PDF"}: ${error instanceof Error ? error.message : String(error)}`;
+}
+
+/** The notice for a repair that failed before the Executor ran anything, so before any vault file was touched. */
+function repairFailedMessage(error: unknown): string {
+	return `Could not carry out the repair: ${error instanceof Error ? error.message : String(error)}. No file was changed.`;
 }
 
 function sameList(a: string[], b: string[]): boolean {

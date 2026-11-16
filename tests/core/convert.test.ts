@@ -1,5 +1,5 @@
 import { expect, test } from "vitest";
-import { convertBody, convertedMessage, convertedSummary, convertProperties, linkTargets } from "../../src/core/convert.ts";
+import { currentOwnTargets, convertBody, convertedMessage, convertedSummary, convertProperties, linkTargets } from "../../src/core/convert.ts";
 
 test("properties: list keeps other entries, single value emptied, marker true", () => {
 	const fm: Record<string, unknown> = { "wrapped-pdf": "[[A.pdf]]", attachments: ["[[Other.png]]", "[[A.pdf|scan]]", "[[sub/A.pdf]]"], source: "[[A.pdf]]", title: "A.pdf" };
@@ -191,4 +191,14 @@ test("summary of the messages of a run: the first, and how many more notes", () 
 	expect(convertedSummary(["one"])).toBe("one");
 	expect(convertedSummary(["one", "two"])).toBe("one The same was done in 1 other note wrapped in this run.");
 	expect(convertedSummary(["one", "two", "three"])).toBe("one The same was done in 2 other notes wrapped in this run.");
+});
+
+test("currentOwnTargets: fresh spellings first, then planned ones that still mean this PDF or nothing", () => {
+	const resolve = (target: string): string | null =>
+		({ "S.pdf": "a/S.pdf", "a/S.pdf": "a/S.pdf", "Other.pdf": "b/Other.pdf" } as Record<string, string>)[target] ?? null;
+	// "x/Old.pdf" was the PDF's path before it was moved: it resolves to nothing now and is still taken out.
+	// "Other.pdf" now resolves to another file: never taken out.
+	expect(currentOwnTargets(["S.pdf"], ["x/Old.pdf", "Other.pdf", "a/S.pdf", "S.pdf"], "a/S.pdf", resolve))
+		.toEqual(["S.pdf", "x/Old.pdf", "a/S.pdf"]);
+	expect(currentOwnTargets([], [], "a/S.pdf", resolve)).toEqual([]);
 });

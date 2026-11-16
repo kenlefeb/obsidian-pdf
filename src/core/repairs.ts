@@ -3,7 +3,7 @@ import { isFree, partnerDestination } from "./follow.ts";
 import { sameLinks, selfLinked, type OwnLinks } from "./marker.ts";
 import type { FileAction, ListItem, MarkedNote, Pair, Pairing, RepairId, VaultSnapshot } from "./model.ts";
 import { healthyPairs, pairOfNote, pairUp } from "./pairing.ts";
-import { basename, dirname, filename, findPathIgnoringCase, isInFolder, isLinkSafeName, isNote, noteBeside, pairKey, pdfBeside } from "./paths.ts";
+import { basename, dirname, filename, findPathIgnoringCase, isInFolder, isNote, noteBeside, pairKey, pdfBeside } from "./paths.ts";
 
 function linksOf(note: MarkedNote): OwnLinks {
 	return { markerLink: note.markerLink, linkedPdf: note.linkedPdf, ownTargets: [...note.ownTargets] };
@@ -286,10 +286,8 @@ export function autoWrapChecker(snapshot: VaultSnapshot, attachmentFolder: strin
 }
 
 /**
- * True when "Wrap all" would try this entry: an unwrapped PDF that is still unwrapped, whose name can be linked, and
- * that has no same-name note beside it in the snapshot's note list (ignoring letter case). A PDF whose name cannot be
- * linked is left to its own Wrap button, which explains why. `pairing` is `pairUp(snapshot)` when the caller already
- * has it.
+ * True when "Wrap all" would try this entry: an unwrapped PDF that is still unwrapped and has no same-name note beside
+ * it in the snapshot's note list (ignoring letter case). `pairing` is `pairUp(snapshot)` when the caller already has it.
  */
 export function isBulkWrappable(item: ListItem, snapshot: VaultSnapshot, pairing?: Pairing): boolean {
 	return bulkWrapChecker(snapshot, pairing)(item);
@@ -304,7 +302,6 @@ export function bulkWrapChecker(snapshot: VaultSnapshot, pairing?: Pairing): (it
 	const noteKeys = new Set(snapshot.notePaths.filter(isNote).map(pairKey));
 	return (item) => item.kind === "unwrapped"
 		&& item.pdfPath !== null
-		&& isLinkSafeName(item.pdfPath)
 		&& !noteKeys.has(pairKey(item.pdfPath))
 		&& unwrapped.has(item.pdfPath);
 }

@@ -76,8 +76,3 @@ export function pdfBeside(notePath: string): string {
 export function noteBeside(pdfPath: string): string {
 	return joinPath(dirname(pdfPath), `${basename(pdfPath)}.md`);
 }
-
-/** False when the path holds characters that cannot appear in a wikilink target; wrapping refuses such a PDF. */
-export function isLinkSafeName(path: string): boolean {
-	return !/[[\]|#^]/.test(path);
-}

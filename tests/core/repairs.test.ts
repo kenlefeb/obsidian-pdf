@@ -506,9 +506,9 @@ test("isBulkWrappable is false for a wrapped or protected PDF, a gone PDF and ot
 	expect(isBulkWrappable(removed("a/S.pdf"), snap([], ["a/S.pdf"]))).toBe(false);
 	expect(isBulkWrappable({ kind: "unwrapped", notePath: null, pdfPath: null }, snap([], ["a/S.pdf"]))).toBe(false);
 });
-test("isBulkWrappable is false for a PDF whose name cannot be linked", () => {
+test("isBulkWrappable does not mind link characters in a PDF's name: nothing links to the PDF", () => {
 	for (const name of ["a/S [1].pdf", "a/S|x.pdf", "a/S#1.pdf", "a/S^1.pdf"]) {
-		expect([name, isBulkWrappable(unwrapped(name), snap([], [name]))]).toEqual([name, false]);
+		expect([name, isBulkWrappable(unwrapped(name), snap([], [name]))]).toEqual([name, true]);
 	}
 });
 
@@ -523,7 +523,7 @@ test("bulkWrapChecker and isBulkWrappable give the expected answer for each entr
 		[unwrapped("a/T.pdf"), true],      // the note of that name is in another folder
 		[unwrapped("b/V.pdf"), true],
 		[unwrapped("c/U.pdf"), true],      // a .txt of that name is not a note
-		[unwrapped("d/W [1].pdf"), false], // name cannot be linked
+		[unwrapped("d/W [1].pdf"), true],  // link characters in the name do not matter
 		[unwrapped("X.pdf"), false],       // X.md is beside it, at the vault root
 		[unwrapped("e/Y.pdf"), false],     // a link-valued marker points to it
 		[unwrapped("gone.pdf"), false],    // not in the vault

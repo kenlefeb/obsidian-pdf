@@ -4,7 +4,8 @@ import {
 	AUTO_WRAP_OUTSIDE_JITTER_MS,
 	AUTO_WRAP_OUTSIDE_SETTLE_MS,
 	autoWrapDueAt,
-	heldForArrivingNote,
+	arrivingNoteFor,
+	heldMessage,
 	pausedMessage,
 	pausesAutoWrap,
 	planAutoWrap,
@@ -39,29 +40,29 @@ test('an outside PDF is due 15 to 30 seconds later, by a per-PDF random extra', 
 
 test('a PDF is not examined before it is due', () => {
 	const plan = planAutoWrap([pend('a/New.pdf', 3000)], 2999, snap([], ['a/New.pdf']), null);
-	expect(plan).toEqual({ wrap: [], drop: [], waitUntil: 3000 });
+	expect(plan).toEqual({ wrap: [], drop: [], held: [], waitUntil: 3000 });
 });
 
 test('a due PDF nobody claims and no note matches is wrapped', () => {
 	const plan = planAutoWrap([pend('a/New.pdf', 3000)], 3000, snap([], ['a/New.pdf']), null);
-	expect(plan).toEqual({ wrap: ['a/New.pdf'], drop: [], waitUntil: null });
+	expect(plan).toEqual({ wrap: ['a/New.pdf'], drop: [], held: [], waitUntil: null });
 });
 
 test('a due PDF whose note arrived meanwhile is dropped, not wrapped', () => {
 	const plan = planAutoWrap([pend('a/New.pdf', 2000)], 5000, snap(['a/New.md'], ['a/New.pdf']), null);
-	expect(plan).toEqual({ wrap: [], drop: ['a/New.pdf'], waitUntil: null });
+	expect(plan).toEqual({ wrap: [], drop: ['a/New.pdf'], held: [], waitUntil: null });
 });
 
 test("a due PDF that a note's link-valued marker points to, that vanished, or that sits in the attachment folder is dropped", () => {
 	const s = snap(['a/Other.md'], ['a/Claimed.pdf', 'att/x.pdf'], [linking('a/Other.md', 'a/Claimed.pdf')]);
 	const pending = ['a/Claimed.pdf', 'gone.pdf', 'att/x.pdf'].map((path) => pend(path, 0));
-	expect(planAutoWrap(pending, 5000, s, 'att')).toEqual({ wrap: [], drop: ['a/Claimed.pdf', 'gone.pdf', 'att/x.pdf'], waitUntil: null });
+	expect(planAutoWrap(pending, 5000, s, 'att')).toEqual({ wrap: [], drop: ['a/Claimed.pdf', 'gone.pdf', 'att/x.pdf'], held: [], waitUntil: null });
 });
 
 test('a burst is judged per PDF: due ones are decided, later ones wait for their own time', () => {
 	const pending = [pend('a/One.pdf', 2000), pend('a/Two.pdf', 3500), pend('a/Three.pdf', 5000)];
 	const plan = planAutoWrap(pending, 3600, snap([], ['a/One.pdf', 'a/Two.pdf', 'a/Three.pdf']), null);
-	expect(plan).toEqual({ wrap: ['a/One.pdf', 'a/Two.pdf'], drop: [], waitUntil: 5000 });
+	expect(plan).toEqual({ wrap: ['a/One.pdf', 'a/Two.pdf'], drop: [], held: [], waitUntil: 5000 });
 });
 
 test('waitUntil is the earliest remaining due time, whatever the order', () => {
@@ -75,21 +76,22 @@ test('a due PDF from outside is dropped, not wrapped, while a marked note withou
 	// A rename in transit (same folder) and a move in transit (same name elsewhere).
 	const s = snap(['a/Old.md', 'c/S.md'], ['a/New.pdf', 'b/S.pdf', 'd/Free.pdf'], [flagged('a/Old.md'), flagged('c/S.md')]);
 	const pending = [pend('a/New.pdf', 0, 'outside'), pend('b/S.pdf', 0, 'outside'), pend('d/Free.pdf', 0, 'outside')];
-	expect(planAutoWrap(pending, 5000, s, null)).toEqual({ wrap: ['d/Free.pdf'], drop: ['a/New.pdf', 'b/S.pdf'], waitUntil: null });
+	expect(planAutoWrap(pending, 5000, s, null)).toEqual({ wrap: ['d/Free.pdf'], drop: ['a/New.pdf', 'b/S.pdf'],
+		held: [{ pdfPath: 'a/New.pdf', notePath: 'a/Old.md' }, { pdfPath: 'b/S.pdf', notePath: 'c/S.md' }], waitUntil: null });
 });
 
 test('a held PDF from outside is not examined before it is due', () => {
 	const s = snap(['a/Old.md'], ['a/New.pdf'], [flagged('a/Old.md')]);
-	expect(planAutoWrap([pend('a/New.pdf', 3000, 'outside')], 2999, s, null)).toEqual({ wrap: [], drop: [], waitUntil: 3000 });
+	expect(planAutoWrap([pend('a/New.pdf', 3000, 'outside')], 2999, s, null)).toEqual({ wrap: [], drop: [], held: [], waitUntil: 3000 });
 });
 
 test('a PDF made inside Obsidian is wrapped whatever marked notes lack a PDF', () => {
 	const s = snap(['a/Old.md', 'c/New.md'], ['a/New.pdf'], [flagged('a/Old.md'), flagged('c/New.md')]);
-	expect(planAutoWrap([pend('a/New.pdf', 0, 'local')], 5000, s, null)).toEqual({ wrap: ['a/New.pdf'], drop: [], waitUntil: null });
+	expect(planAutoWrap([pend('a/New.pdf', 0, 'local')], 5000, s, null)).toEqual({ wrap: ['a/New.pdf'], drop: [], held: [], waitUntil: null });
 });
 
 test('nothing pending means nothing to do', () => {
-	expect(planAutoWrap([], 0, snap([], []), null)).toEqual({ wrap: [], drop: [], waitUntil: null });
+	expect(planAutoWrap([], 0, snap([], []), null)).toEqual({ wrap: [], drop: [], held: [], waitUntil: null });
 });
 
 const ok = (name: string): WrapOutcome => ({ kind: 'wrapped', name });
@@ -171,25 +173,42 @@ test('a pass that paused shows the paused notice once, after the wraps before it
 		.toEqual([`Automatic wrapping paused: ${TEMPLATE_FAILED} ${PAUSE_TAIL}`]);
 });
 
-// heldForArrivingNote: a PDF from outside is not wrapped while it may be half of a pair still arriving.
+// arrivingNoteFor: a PDF from outside is not wrapped while it may be half of a pair still arriving.
 const marked = (notePath: string): MarkedNote => ({ notePath, markerLink: null, linkedPdf: null, ownTargets: [] });
 const pairing = (notes: string[], pdfPaths: string[]) => pairUp({ notePaths: notes, pdfPaths, marked: notes.map(marked) });
 
-test('heldForArrivingNote holds a PDF while a marked note in its folder has no PDF (a rename in transit)', () => {
-	expect(heldForArrivingNote('a/New.pdf', pairing(['a/Old.md'], ['a/New.pdf']))).toBe(true);
-	expect(heldForArrivingNote('New.pdf', pairing(['Old.md'], ['New.pdf']))).toBe(true);
+test('arrivingNoteFor holds a PDF while a marked note in its folder has no PDF (a rename in transit)', () => {
+	expect(arrivingNoteFor('a/New.pdf', pairing(['a/Old.md'], ['a/New.pdf']))).not.toBeNull();
+	expect(arrivingNoteFor('New.pdf', pairing(['Old.md'], ['New.pdf']))).not.toBeNull();
 });
-test('heldForArrivingNote holds a PDF while a marked note of its name elsewhere has no PDF (a move in transit)', () => {
-	expect(heldForArrivingNote('b/S.pdf', pairing(['a/S.md'], ['b/S.pdf']))).toBe(true);
-	expect(heldForArrivingNote('b/S.PDF', pairing(['a/deep/S.md'], ['b/S.PDF']))).toBe(true);
+test('arrivingNoteFor holds a PDF while a marked note of its name elsewhere has no PDF (a move in transit)', () => {
+	expect(arrivingNoteFor('b/S.pdf', pairing(['a/S.md'], ['b/S.pdf']))).not.toBeNull();
+	expect(arrivingNoteFor('b/S.PDF', pairing(['a/deep/S.md'], ['b/S.PDF']))).not.toBeNull();
 });
-test('heldForArrivingNote does not hold a PDF for a note elsewhere under another name, or with no marked notes', () => {
-	expect(heldForArrivingNote('b/S.pdf', pairing(['a/T.md'], ['b/S.pdf']))).toBe(false);
-	expect(heldForArrivingNote('b/S.pdf', pairing(['bb/T.md'], ['b/S.pdf']))).toBe(false); // a folder whose name only starts the same
-	expect(heldForArrivingNote('b/S.pdf', pairing(['b/deep/T.md'], ['b/S.pdf']))).toBe(false); // a subfolder is not the same folder
-	expect(heldForArrivingNote('b/S.pdf', pairing([], ['b/S.pdf']))).toBe(false);
+test('arrivingNoteFor does not hold a PDF for a note elsewhere under another name, or with no marked notes', () => {
+	expect(arrivingNoteFor('b/S.pdf', pairing(['a/T.md'], ['b/S.pdf']))).toBeNull();
+	expect(arrivingNoteFor('b/S.pdf', pairing(['bb/T.md'], ['b/S.pdf']))).toBeNull(); // a folder whose name only starts the same
+	expect(arrivingNoteFor('b/S.pdf', pairing(['b/deep/T.md'], ['b/S.pdf']))).toBeNull(); // a subfolder is not the same folder
+	expect(arrivingNoteFor('b/S.pdf', pairing([], ['b/S.pdf']))).toBeNull();
 });
-test('heldForArrivingNote does not hold a PDF when that marked note has its PDF', () => {
-	expect(heldForArrivingNote('a/New.pdf', pairing(['a/Old.md'], ['a/Old.pdf', 'a/New.pdf']))).toBe(false);
-	expect(heldForArrivingNote('b/S.pdf', pairing(['a/S.md'], ['a/S.pdf', 'b/S.pdf']))).toBe(false);
+test('arrivingNoteFor does not hold a PDF when that marked note has its PDF', () => {
+	expect(arrivingNoteFor('a/New.pdf', pairing(['a/Old.md'], ['a/Old.pdf', 'a/New.pdf']))).toBeNull();
+	expect(arrivingNoteFor('b/S.pdf', pairing(['a/S.md'], ['a/S.pdf', 'b/S.pdf']))).toBeNull();
+});
+
+test('arrivingNoteFor names the marked note a held PDF may belong to, or null', () => {
+	expect(arrivingNoteFor('a/New.pdf', pairing(['a/Old.md'], ['a/New.pdf']))).toBe('a/Old.md');
+	expect(arrivingNoteFor('b/S.pdf', pairing(['a/S.md'], ['b/S.pdf']))).toBe('a/S.md');
+	expect(arrivingNoteFor('b/S.pdf', pairing(['a/T.md'], ['b/S.pdf']))).toBeNull();
+});
+test('the plan names each outside PDF it holds back and the note that holds it', () => {
+	const s = snap(['a/Old.md'], ['a/New.pdf', 'att/x.pdf'], [marked('a/Old.md')]);
+	const pending = [pend('a/New.pdf', 0, 'outside'), pend('att/x.pdf', 0, 'outside')];
+	expect(planAutoWrap(pending, 5000, s, 'att')).toEqual({
+		wrap: [], drop: ['a/New.pdf', 'att/x.pdf'], held: [{ pdfPath: 'a/New.pdf', notePath: 'a/Old.md' }], waitUntil: null,
+	});
+});
+test('heldMessage names the PDF and the note', () => {
+	expect(heldMessage('a/New.pdf', 'a/Old.md'))
+		.toBe('a/New.pdf was not wrapped automatically: a/Old.md is a wrapped note with no PDF, and this PDF may be its PDF still arriving. It stays listed as Not wrapped.');
 });

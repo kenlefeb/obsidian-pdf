@@ -36,13 +36,15 @@ export interface AutoWrapPlan {
 	 * the attachment folder), and those from outside held back for a note that may still be arriving.
 	 */
 	drop: string[];
+	/** Of `drop`, the PDFs from outside held back for a note that may still be arriving, each with that note. */
+	held: { pdfPath: string; notePath: string }[];
 	/** When the earliest PDF that is not due yet becomes due, or null when none is waiting. */
 	waitUntil: number | null;
 }
 
 /**
  * Judges each pending PDF once it is due, against `snapshot`. A PDF that is not due yet is left alone. A due PDF
- * that arrived from outside is dropped, not wrapped and not tried again, while `heldForArrivingNote` is true for it;
+ * that arrived from outside is dropped, not wrapped and not tried again, while `arrivingNoteFor` names a note for it;
  * one made inside Obsidian is not held. The snapshot must be taken after any earlier wrap has finished.
  */
 export function planAutoWrap(
@@ -51,37 +53,49 @@ export function planAutoWrap(
 	snapshot: VaultSnapshot,
 	attachmentFolder: string | null,
 ): AutoWrapPlan {
-	const plan: AutoWrapPlan = { wrap: [], drop: [], waitUntil: null };
+	const plan: AutoWrapPlan = { wrap: [], drop: [], held: [], waitUntil: null };
 	// Indexed once per call: a pass over hundreds of new PDFs in a large vault must not compare every pair of files.
 	const shouldWrap = autoWrapChecker(snapshot, attachmentFolder);
 	// Paired only when a due PDF from outside needs it.
 	let pairing: Pairing | null = null;
-	const isHeld = (path: string): boolean => {
+	const heldBy = (path: string): string | null => {
 		pairing = pairing ?? pairUp(snapshot);
-		return heldForArrivingNote(path, pairing);
+		return arrivingNoteFor(path, pairing);
 	};
 	for (const { path, due, origin } of pending) {
 		if (due > now) {
 			plan.waitUntil = plan.waitUntil === null ? due : Math.min(plan.waitUntil, due);
-		} else if (shouldWrap(path) && !(origin === "outside" && isHeld(path))) {
+			continue;
+		}
+		const wrappable = shouldWrap(path);
+		const notePath = wrappable && origin === "outside" ? heldBy(path) : null;
+		if (wrappable && notePath === null) {
 			plan.wrap.push(path);
 		} else {
 			plan.drop.push(path);
+			if (notePath !== null) plan.held.push({ pdfPath: path, notePath });
 		}
 	}
 	return plan;
 }
 
 /**
- * True when an outside-arrived PDF must not be wrapped automatically: a marked note with no PDF is in the same folder
- * (a rename in transit), or has the same base name anywhere (a move in transit). That is what a pair looks like on a
- * second device while its PDF has arrived and its note has not; wrapping it would make a second note.
+ * The marked note for which an outside-arrived PDF must not be wrapped automatically, or null when there is none: the
+ * first marked note with no PDF that is in the same folder (a rename in transit) or has the same base name anywhere
+ * (a move in transit). That is what a pair looks like on a second device while its PDF has arrived and its note has
+ * not; wrapping it would make a second note.
  */
-export function heldForArrivingNote(pdfPath: string, pairing: Pairing): boolean {
+export function arrivingNoteFor(pdfPath: string, pairing: Pairing): string | null {
 	const folder = dirname(pdfPath);
 	const name = basename(pdfPath);
-	return pairing.pairs.some((pair) => pair.pdfPath === null
-		&& (dirname(pair.note.notePath) === folder || basename(pair.note.notePath) === name));
+	return pairing.pairs.find((pair) => pair.pdfPath === null
+		&& (dirname(pair.note.notePath) === folder || basename(pair.note.notePath) === name))?.note.notePath ?? null;
+}
+
+/** The console line for a PDF held back for the note `arrivingNoteFor` names (no notice is shown for it). */
+export function heldMessage(pdfPath: string, notePath: string): string {
+	return `${pdfPath} was not wrapped automatically: ${notePath} is a wrapped note with no PDF, and this PDF may be its PDF still arriving. `
+		+ "It stays listed as Not wrapped.";
 }
 
 /**

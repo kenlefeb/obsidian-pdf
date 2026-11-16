@@ -1,10 +1,15 @@
-import { Notice, type App, type TAbstractFile } from "obsidian";
+import { Notice, TFile, type App, type TAbstractFile } from "obsidian";
+import { currentOwnTargets } from "../core/convert.ts";
 import type { OwnChanges } from "../core/marks.ts";
 import type { FileAction } from "../core/model.ts";
+import { findPdfBeside } from "../core/pairing.ts";
+import { isPdf } from "../core/paths.ts";
 import type { PdfWrapperSettings } from "../core/settings-data.ts";
-import { siblingNotePath, wrapPdf, WrapIncomplete, WrapMessage } from "../pdf-wrapper.ts";
+import { siblingNotePath, wrapPdf, WrapIncomplete, WrapMessage, type WrapOptions } from "../pdf-wrapper.ts";
 import { thenHook } from "../core/then-hook.ts";
-import { BodyConvertError, convertNote } from "./vault-snapshot.ts";
+import { waitAtMost } from "../core/wait.ts";
+import { BodyConvertError, convertNote, ownTargetsFor } from "./vault-snapshot.ts";
+import { IDLE_WAIT_MS } from "./watcher.ts";
 
 interface RunOptions {
 	quiet?: boolean;
@@ -27,7 +32,19 @@ export class Executor {
 		private readonly own: OwnChanges,
 		/** Called after every `run`, even a failed one, because files may have changed. */
 		private readonly afterRun: () => void = () => undefined,
+		/** Resolves once no file operation made inside Obsidian is still running (`LocalIntent.whenIdle`). */
+		private readonly whenIdle: () => Promise<void> = () => Promise.resolve(),
 	) {}
+
+	/**
+	 * `wrapPdf` with the note it creates marked as the plugin's own change, so the Watcher does not take it for a note
+	 * the user made. The mark is removed once the wrap settles either way: if Templater created the note elsewhere and
+	 * it was moved into place, no create event used the mark, and it must not linger.
+	 */
+	wrapMarked(pdf: TFile, options: WrapOptions): Promise<TFile> {
+		return this.withMark(siblingNotePath(pdf), "settled", () =>
+			wrapPdf(this.app, this.getSettings(), this.saveSettings, pdf, options));
+	}
 
 	/**
 	 * Runs the actions one after another. Resolves true when every action ran, false when it stopped
@@ -112,8 +129,27 @@ export class Executor {
 	private async convert(notePath: string, ownTargets: string[]): Promise<Outcome> {
 		const note = this.app.vault.getFileByPath(notePath);
 		if (!note) return "stale";
-		await this.withMark(notePath, "settled", () => convertNote(this.app, note, this.getSettings().markerProperty, ownTargets));
+		// A rename just before this (Convert moving the PDF beside the note) makes Obsidian rewrite the note's links to
+		// the PDF. Let that finish, as far as the plugin can tell, then read the spellings the note uses now.
+		await waitAtMost(this.whenIdle(), IDLE_WAIT_MS).done;
+		const targets = await this.ownTargetsNow(note, ownTargets);
+		await this.withMark(notePath, "settled", () => convertNote(this.app, note, this.getSettings().markerProperty, targets));
 		return "done";
+	}
+
+	/**
+	 * The link spellings to convert, as the note stands now: those its text uses for the PDF beside it, and the
+	 * planned ones that still resolve to that PDF or to nothing (see `currentOwnTargets`). With no PDF beside the
+	 * note, the planned ones as given.
+	 */
+	private async ownTargetsNow(note: TFile, planned: string[]): Promise<string[]> {
+		const beside = (note.parent?.children ?? []).filter((file) => file instanceof TFile && isPdf(file.path)).map((file) => file.path);
+		const pdfPath = findPdfBeside(note.path, beside);
+		const pdf = pdfPath === null ? null : this.app.vault.getFileByPath(pdfPath);
+		if (pdf === null) return planned;
+		const fresh = await ownTargetsFor(this.app, note, pdf);
+		return currentOwnTargets(fresh, planned, pdf.path,
+			(target) => this.app.metadataCache.getFirstLinkpathDest(target, note.path)?.path ?? null);
 	}
 
 	private async delete(path: string): Promise<Outcome> {
@@ -133,10 +169,7 @@ export class Executor {
 		const pdf = this.app.vault.getFileByPath(pdfPath);
 		if (!pdf) return "stale";
 		try {
-			// Released once the wrap settles either way: if Templater created the note elsewhere and it was moved
-			// into place, no create event used the mark, and it must not linger.
-			await this.withMark(siblingNotePath(pdf), "settled", () =>
-				wrapPdf(this.app, this.getSettings(), this.saveSettings, pdf, { open: false, onConverted }));
+			await this.wrapMarked(pdf, { open: false, onConverted });
 		} catch (error) {
 			// The PDF is wrapped; only a later step failed. Say so and carry on.
 			if (quiet || !(error instanceof WrapIncomplete)) throw error;

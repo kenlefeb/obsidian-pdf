@@ -1,7 +1,7 @@
 import { App, normalizePath, Notice, TFile, TFolder, type TAbstractFile } from "obsidian";
 import { BLOCK_LANGUAGE } from "./core/block.ts";
 import { convertedMessage } from "./core/convert.ts";
-import { dirname, findPathIgnoringCase, isLinkSafeName, isNote, joinPath } from "./core/paths.ts";
+import { dirname, findPathIgnoringCase, isNote, joinPath } from "./core/paths.ts";
 import type { PdfWrapperSettings } from "./core/settings-data.ts";
 import { noteExistedMessage, notesAppearedMessage, templaterResult } from "./core/templater-outcome.ts";
 import {
@@ -148,10 +148,6 @@ async function wrapOnce(
 	pdfFile: TFile,
 	options: WrapOptions,
 ): Promise<TFile> {
-	if (!isLinkSafeName(pdfFile.path)) {
-		throw new WrapRefusal(`Cannot wrap ${pdfFile.name}: file names containing [ ] | # ^ cannot be linked. Rename the PDF first.`);
-	}
-
 	const folder = pdfFile.parent;
 	if (!folder) throw new Error(`Cannot determine the folder of ${pdfFile.path}.`);
 

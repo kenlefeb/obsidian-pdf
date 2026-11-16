@@ -2,7 +2,7 @@ import { Notice, TFile, type App } from "obsidian";
 import { listNotice } from "../core/list-text.ts";
 import { isNote, isPdf } from "../core/paths.ts";
 import type PdfWrapperPlugin from "../main.ts";
-import { existingSiblingNote, wrapPdf, WrapMessage } from "../pdf-wrapper.ts";
+import { existingSiblingNote, WrapMessage } from "../pdf-wrapper.ts";
 import { AttentionModal } from "../ui/attention-modal.ts";
 import type { AttentionStore } from "./attention-store.ts";
 import { duplicateWrapped, healthyPdf } from "./duplicate.ts";
@@ -32,7 +32,12 @@ function canDuplicate(plugin: PdfWrapperPlugin, file: TFile): boolean {
 export function registerCommands(plugin: PdfWrapperPlugin, deps: CommandDeps): { showAttention: () => void } {
 	const { app } = plugin;
 	const showAttention = () => new AttentionModal(app, deps.store).open();
-	const duplicate = (file: TFile) => void duplicateWrapped(app, deps.executor, plugin.settings, file, deps.refreshSoon);
+	const duplicate = (file: TFile) => {
+		duplicateWrapped(app, deps.executor, plugin.settings, file, deps.refreshSoon).catch((error: unknown) => {
+			new Notice(`Could not duplicate ${file.name}: ${error instanceof Error ? error.message : String(error)}`);
+			console.error('PDF Wrapper: failed to duplicate', file.path, error);
+		});
+	};
 
 	plugin.addCommand({
 		id: 'show-needs-attention',
@@ -52,7 +57,7 @@ export function registerCommands(plugin: PdfWrapperPlugin, deps: CommandDeps): {
 		checkCallback: (checking) => {
 			const file = app.workspace.getActiveFile();
 			if (!file || !canWrap(app, file)) return false;
-			if (!checking) void wrapFromUser(plugin, file, deps.refreshSoon);
+			if (!checking) void wrapFromUser(deps.executor, file, deps.refreshSoon);
 			return true;
 		},
 	});
@@ -82,7 +87,7 @@ export function registerCommands(plugin: PdfWrapperPlugin, deps: CommandDeps): {
 				menu.addItem((item) => {
 					item.setTitle('Wrap PDF')
 						.setIcon('file-text')
-						.onClick(() => wrapFromUser(plugin, file, deps.refreshSoon));
+						.onClick(() => wrapFromUser(deps.executor, file, deps.refreshSoon));
 				});
 			}
 		}),
@@ -100,10 +105,13 @@ export function showStartupNotice(count: number, showAttention: () => void): voi
 	});
 }
 
-/** A wrap the user asked for: opens the note and reports the outcome in a notice. */
-async function wrapFromUser(plugin: PdfWrapperPlugin, pdfFile: TFile, afterWrap: () => void): Promise<void> {
+/**
+ * A wrap the user asked for: opens the note and reports the outcome in a notice. Through the Executor, so the note it
+ * creates is marked as the plugin's own change.
+ */
+async function wrapFromUser(executor: Executor, pdfFile: TFile, afterWrap: () => void): Promise<void> {
 	try {
-		await wrapPdf(plugin.app, plugin.settings, () => plugin.saveSettings(), pdfFile, { open: true });
+		await executor.wrapMarked(pdfFile, { open: true });
 		new Notice(`Wrapped ${pdfFile.basename}`);
 	} catch (e) {
 		if (e instanceof WrapMessage) {

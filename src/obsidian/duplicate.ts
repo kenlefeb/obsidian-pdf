@@ -73,7 +73,13 @@ export async function duplicateWrapped(
 			return;
 		}
 		const copy = app.vault.getFileByPath(target.note);
-		if (copy) await app.workspace.getLeaf(false).openFile(copy);
+		try {
+			if (copy) await app.workspace.getLeaf(false).openFile(copy);
+		} catch (error) {
+			// Both files are copied; only showing the copy failed.
+			new Notice(`Duplicated ${note.name} as ${target.note}, but could not open the copy.`);
+			console.error("PDF Wrapper: could not open the duplicate", target.note, error);
+		}
 	} finally {
 		inFlight.delete(note.path);
 		onDone();

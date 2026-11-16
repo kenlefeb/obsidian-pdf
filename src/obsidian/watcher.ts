@@ -54,6 +54,8 @@ export interface WatcherDeps {
 
 const reason = (error: unknown): string => (error instanceof Error ? error.message : String(error));
 
+const isPairFile = (path: string): boolean => isNote(path) || isPdf(path);
+
 /**
  * Follows renames, moves, deletes and copies made inside Obsidian across a pair, by passing each vault event to
  * `follow` and running the actions it returns: a rename, copy or delete of the partner file, or a notice. No note's
@@ -134,6 +136,8 @@ export class Watcher {
 	private onRename(file: TAbstractFile, oldPath: string): void {
 		// A folder's children fire their own renames.
 		if (!(file instanceof TFile)) return;
+		// Neither name is a note's or a PDF's (an image, say): nothing here concerns a pair.
+		if (!isPairFile(file.path) && !isPairFile(oldPath)) return;
 		// A note created moments ago has left that path: a note sync puts there later is not that create.
 		this.forgetCreate(oldPath);
 		if (this.isOwn(oldPath)) return;
@@ -144,15 +148,16 @@ export class Watcher {
 	}
 
 	private onCreate(file: TAbstractFile): void {
-		if (!(file instanceof TFile) || this.isOwn(file.path)) return;
+		// Anything but a note or a PDF (a pasted image, say) concerns no pair: no snapshot is taken for it.
+		if (!(file instanceof TFile) || !isPairFile(file.path) || this.isOwn(file.path)) return;
 		if (isNote(file.path)) {
 			this.onNoteCreated(file.path);
 			return;
 		}
 		// A PDF's `local` only sets automatic wrapping's settle time; it does not depend on any follow setting.
 		const local = this.deps.localIntent.consume(file.path);
-		if (isPdf(file.path)) this.deps.onPdfCreated(file.path, local);
-		// Only a new note is followed; this ends in a recheck.
+		this.deps.onPdfCreated(file.path, local);
+		// A new PDF is never followed: `follow` does nothing for it but ask for a recheck of the list.
 		this.enqueue({ kind: "create", path: file.path, local, copiedFrom: null });
 	}
 

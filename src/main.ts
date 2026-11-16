@@ -29,7 +29,7 @@ export default class PdfWrapperPlugin extends Plugin {
 		// Anything the plugin does that can change pairs ends in a refresh, so the explorer rules never go stale.
 		// The metadata cache can lag a frontmatter write, so look once more after the settle period.
 		let refreshSoon: () => void = () => undefined;
-		const executor = new Executor(this.app, () => this.settings, () => this.saveSettings(), own, () => refreshSoon());
+		const executor = new Executor(this.app, () => this.settings, () => this.saveSettings(), own, () => refreshSoon(), () => localIntent.whenIdle());
 		const store = new AttentionStore(this, executor, () => isAutoWrapOn(this.app));
 		const scheduler = createRefreshScheduler(() => store.refresh(), SETTLE_MS, {
 			set: (fn, ms) => window.setTimeout(fn, ms),

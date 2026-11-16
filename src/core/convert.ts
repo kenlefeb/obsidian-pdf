@@ -42,6 +42,25 @@ export function convertProperties(frontmatter: Record<string, unknown>, markerPr
 }
 
 /**
+ * The link spellings to convert in a note, decided when the convert runs: `fresh` (the spellings the note uses now
+ * for the PDF beside it), then those of `planned` (the spellings known when the convert was planned) that still
+ * resolve to that PDF or to nothing. A planned spelling that now resolves to another file is left out, so a link to
+ * some other file is never taken out. `resolve` gives the path a target resolves to from the note, or null.
+ */
+export function currentOwnTargets(
+	fresh: string[],
+	planned: string[],
+	pdfPath: string,
+	resolve: (target: string) => string | null,
+): string[] {
+	const stillOwn = planned.filter((target) => {
+		const destination = resolve(target);
+		return destination === null || destination === pdfPath;
+	});
+	return [...new Set([...fresh, ...stillOwn])];
+}
+
+/**
  * Body only (frontmatter untouched). Each embed of an own target becomes BLOCK_TEXT on its own lines; each plain
  * link to one becomes its display text (alias, else the file name). A link is to an own target when its target, with
  * any `#subpath` and `|alias` removed and URL-decoded for markdown links, equals one of `ownTargets` exactly.
