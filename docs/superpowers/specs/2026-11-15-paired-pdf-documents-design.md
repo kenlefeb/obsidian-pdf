@@ -20,9 +20,10 @@ moves and deletes have to be done twice, and anything that touches the files
 outside Obsidian silently breaks the pair. The plugin's job is to make the pair
 hold together.
 
-Today the plugin does one thing: a "Wrap PDF" action that moves a PDF to the
-attachment folder and creates a note from a template. That becomes the entry
-point to the new behaviour; everything else here is new.
+History: when this design was first written (release 1.0.0) the plugin did
+one thing, a "Wrap PDF" action that moved a PDF to the attachment folder and
+created a note from a template. That became the entry point to the behaviour
+described here; the PDF no longer moves.
 
 Later, the owner intends to fill frontmatter from the PDF's own contents. That
 is not part of this work, but wrapping should be one clear step that such
@@ -45,8 +46,10 @@ extraction can later plug into.
 7. The vault stays plain files that are fully usable without the plugin.
    (Weakened in revision 7: without the plugin the note no longer shows its
    PDF. See "What gets weaker".)
-8. Renaming, moving, copying or duplicating a wrapped document edits no file
-   contents, on the acting device or any other (revision 7).
+8. Renaming, moving, copying or duplicating a wrapped document does not edit
+   the wrapped note, on the acting device or any other (revision 7). Other
+   notes that link to the PDF are still updated by Obsidian's own link
+   updating when the PDF is renamed.
 
 ## Non-goals
 
@@ -170,7 +173,8 @@ Each setting's description says plainly what it relies on and when to turn it
 off.
 
 This rule depends on telling a local action from everything else. See "Local
-intent" under Technical notes; it is the main thing spike 2 must confirm. If a
+intent" under Technical notes. It remains unverified; spike 2 would confirm
+it, but since revision 5 it is an optional diagnostic and gates nothing. If a
 change cannot be positively identified as local, it is treated as not local.
 
 ## Revision 7: a wrapped note does not name its PDF
@@ -194,8 +198,11 @@ a pair kept in step by hand. It could not be fixed in the follow logic.
 ### The change (decided by the owner)
 
 **A wrapped note no longer refers to its PDF by name.** Renaming, moving or
-copying a pair then changes file names only. No file's contents change, on any
-device, so there is nothing for sync to collide on. Whether this cures the
+copying a pair then changes file names only. The wrapped note's contents do
+not change, on any device, so there is nothing in it for sync to collide on.
+(The partner file is renamed with `fileManager.renameFile`, so Obsidian still
+updates links to it in other notes, or shows its "Update links?" prompt when
+"Automatically update internal links" is off.) Whether this cures the
 duplication has not been run in Obsidian; it is the first check in
 `docs/manual-test-checklist.md`.
 
@@ -304,8 +311,14 @@ the active PDF *(call)*.
   When this removes something the template put there, the user is told which
   property or what kind of line, so they can fix the template; a run over
   several PDFs (automatic wrapping, "Wrap all") says it once. *(call)*
-- Refuses, with a clear notice, if a note of that name already exists, or if
-  the PDF's name contains a character a link cannot hold (`[ ] | # ^`).
+- "Wrap PDF" and "Wrap active PDF" are not offered for a PDF that already
+  has a note of the same name beside it. A wrap that still meets such a note
+  (it appeared at the last moment, or a list button was used) refuses with a
+  notice naming it.
+- No PDF name is refused. Up to revision 6 names containing `[ ] | # ^` were,
+  because the note had to link to the PDF; nothing links to it now. Whether
+  Obsidian and Templater accept creating a note with such a name is
+  unverified; a failure is reported by the ordinary wrap failure notice.
 
 **No prerequisites** (owner's decision, revision 4). Wrapping must work
 straight after installing the plugin, with nothing configured.
@@ -340,8 +353,8 @@ straight after installing the plugin, with nothing configured.
   something else) is left in the template; if it turns out to point at the
   note's own PDF, the conversion after the wrap takes it out of the note.
 - *Failure.* If any of this cannot be done, the wrap stops and a notice names
-  the file and the reason (for example, "Could not create the default
-  template at X: a folder with that name exists."). There is no generic
+  the file and the reason (for example, "X is a folder, not a template
+  file."). There is no generic
   "no template configured" message.
 
 Known sync risk: two devices that both find no template before settings have
@@ -382,7 +395,10 @@ Details, all *(call)*:
 - The plugin waits a settle period, then wraps only if the PDF still exists,
   no link-valued marker points to it, and no note of that name exists. This
   is what stops a device from wrapping a PDF whose note is about to arrive by
-  sync.
+  sync. The settle period as built: about 2 seconds for a PDF made inside
+  Obsidian on this device; 15 seconds plus a random 0 to 15 for any other
+  arrival, so two devices rarely act together. Both are provisional, not
+  tuned against real sync behaviour.
 - **Guard for a pair in transit** (revision 7) *(call)*: a PDF that arrives
   from outside is **not** wrapped automatically while there is a marked note
   whose PDF is not found and which is either in the same folder as the
@@ -393,7 +409,11 @@ Details, all *(call)*:
   to prevent. A PDF held back by the guard is not retried automatically. It
   stays listed as Not wrapped; if the note then arrives the pair is simply
   healthy, and if it was a false alarm the owner wraps it from the list. A
-  PDF made inside Obsidian is not held.
+  PDF made inside Obsidian is not held. The hold shows no notice (one console
+  line names the PDF and the note), and it is folder-wide: one "PDF not
+  found" note in a folder, including an unconverted note whose PDF is
+  elsewhere, holds every outside PDF that arrives in that folder until the
+  note is resolved.
 - Automatic wrapping does not open the new note; it shows a notice.
 - PDFs created in Obsidian's configured attachment folder are skipped when
   that setting names a specific folder. Those are files pasted or dropped into
@@ -488,7 +508,7 @@ not found" when it has none.
 
 | Entry | Fixes offered |
 |---|---|
-| PDF not found | **Use a PDF**: pick from unwrapped PDFs (same folder first, then same name elsewhere); it is moved and renamed to the note's name. **Rename note to match**: for an unwrapped PDF in the same folder, the note takes the PDF's name instead. **Copy another document's PDF**: pick a wrapped document; its PDF is copied under this note's name. **Remove the marker.** A fix that needs a choice is offered only when there is something to choose. |
+| PDF not found | **Use a PDF**: pick from unwrapped PDFs (same folder first, then same name elsewhere); it is moved and renamed to the note's name. **Rename note to match**: for an unwrapped PDF in the same folder, the note takes the PDF's name instead. **Copy another document's PDF**: pick from the PDFs of the wrapped documents (the chooser lists PDF paths); it is copied under this note's name. **Remove the marker.** A fix that needs a choice is offered only when there is something to choose. |
 | Links to its own PDF | **Convert**, described below. |
 | Its note was deleted; the PDF was kept | Keep as a plain PDF; Wrap; Delete the PDF (asks first). |
 | Not wrapped | Wrap. |
@@ -499,7 +519,11 @@ do and asking for confirmation:
 1. If the note has **no** PDF beside it and its marker is a link to a PDF
    elsewhere, that PDF is first moved and renamed beside the note. This is
    refused, with a notice, if the name is taken or another note's marker
-   points to the same PDF.
+   points to the same PDF. The move goes through Obsidian's rename, which
+   rewrites the note's links to the PDF; so after it the plugin waits for the
+   in-app operation to finish (capped at 10 s) and reads the note's links to
+   the PDF again from its current text before steps 2 to 4. One Convert is
+   meant to do the whole job. Unverified in Obsidian.
 2. The marker becomes `true`.
 3. The PDF is taken out of every other property: removed from a list, leaving
    the other entries; a property holding only that link is emptied.
@@ -511,7 +535,11 @@ Decided during the build:
 - With a PDF already beside the note, Convert never moves a file. If the
   marker points at a *different* PDF, that one stays where it is and is then
   an ordinary unwrapped PDF (listed as Not wrapped when automatic wrapping is
-  on).
+  on). Links and embeds of that other PDF in the body are kept: it is
+  another file.
+- Convert adds no block. Only existing embeds become one, so a note with a
+  link-valued marker and no embed shows no PDF after Convert until the block
+  is added by hand.
 - If the marker's PDF is the PDF of another wrapped document, Convert does
   not move it. The note is converted and then shows as PDF not found.
 - If the marker's PDF does not exist, the note is converted and then shows as
@@ -562,7 +590,8 @@ folder are excluded, as for automatic wrapping. *(call)*
   the property in existing notes; the setting's description says so, since
   notes carrying the old name stop being recognised. *(call)*
 - Wrap new PDFs automatically (per device, default off).
-- Hide paired PDFs in the file explorer (default on).
+- Hide paired PDF files in the file explorer (default on). The "PDF" marker
+  on the note's row shows whether this is on or off.
 - Delete the PDF when its note is deleted in Obsidian (default on).
 - Rename and move the PDF with its note (default on).
 
@@ -571,19 +600,25 @@ delete rule makes it unnecessary.
 
 ## Technical notes for the builder
 
-- **Fix first:** on `main`, `PdfWrapperSettings` is a class holding `app`, and
-  the instance is passed to `saveData`. This should fail to serialise and has
-  not been verified in Obsidian. Settings should go back to a plain data
-  object. The cached attachment-folder lookup goes away with the feature.
+These notes were written for the first build. Where one has been carried out,
+it says so.
+
+- **Fix first (done):** in release 1.0.0, `PdfWrapperSettings` was a class
+  holding `app`, and the instance was passed to `saveData`. Settings are now a
+  plain data object (`src/core/settings-data.ts`), and the cached
+  attachment-folder lookup went away with the feature.
 - **Local intent.** Obsidian's vault events do not say where a change came
-  from. The designer's proposed mechanism: wrap the documented `Vault` methods
-  that in-app actions go through (`rename`, `trash`, `delete`) so the plugin
-  notes "this path is being changed locally" just before the event fires.
-  Changes Obsidian picks up from the file system should not pass through those
-  methods. This wraps public API, not explorer internals, but it is still an
-  interception and is **unverified**: in particular, whether Obsidian Sync
-  applies remote changes through the same methods is unknown. Spike 2 settles
-  it. Whatever the mechanism, the default when unsure is "not local".
+  from. As built: the plugin wraps, on the `app.vault` instance, `rename`,
+  `trash` and `delete` (so the event that follows reads as local), `create`,
+  `createBinary` and `copy` (so a file made inside Obsidian reads as local,
+  and a single-file copy records its source), and on `app.fileManager`
+  `renameFile` (no mark of its own; it keeps the operation "in flight" while
+  Obsidian rewrites links). Changes Obsidian picks up from the file system
+  should not pass through those methods. This wraps public API, not explorer
+  internals, but it is still an interception and is **unverified**: in
+  particular, whether Obsidian Sync applies remote changes through the same
+  methods is unknown. Spike 2 would settle it. Whatever the mechanism, the
+  default when unsure is "not local".
 - **Shape the core for testing.** Put pairing and fix planning in
   a module that takes a plain snapshot (file paths, and the marked notes) and
   returns states and intended actions, with no Obsidian imports. A thin layer
@@ -604,15 +639,15 @@ delete rule makes it unnecessary.
   Register `create` handling only after layout is ready, since the vault fires
   `create` for every file on load. Raise `minAppVersion` to whatever these
   require.
-- **Naming is inconsistent after the rename to `pdf-wrapper`.** README,
-  CLAUDE.md and `package.json` still say `wrap-pdf` / "Wrap PDF" and reference
-  `src/wrap-pdf.ts`. Bring them in line and rewrite the README for the new
-  behaviour.
-- Three Dependabot PRs are open; merge or supersede as convenient.
+- **Naming (done).** README, CLAUDE.md and `package.json` were brought in
+  line with the rename to `pdf-wrapper`.
 
 ## Spikes (need the owner's hands in real vaults)
 
-These are throwaway and gate decisions in the plan.
+These are throwaway. They were written to gate decisions in the plan; since
+revision 5 the owner chose not to gate the build on them, so they are optional
+diagnostics. Spike 1 was run by the owner on desktop (300 and 3,000 rows);
+spike 2 has not been run.
 
 1. **Explorer hiding at scale.** Hide several hundred, then a few thousand,
    rows by styling rules, on desktop and on mobile. Look for gaps or missing
@@ -647,7 +682,7 @@ These are throwaway and gate decisions in the plan.
   permanent deletion. This is the owner's explicit choice.
 - **Automatic wrapping on several devices** can produce conflicting notes for
   the same PDF. Mitigated by settle-and-check and the per-device switch;
-  residual risk until spike 2.
+  the residual risk stands (spike 2, which would measure it, was not run).
 - **Marker name differing between devices** (if settings are not synced) makes
   one device blind to pairs. It would then leave everything alone, which is
   safe but confusing.
@@ -656,7 +691,8 @@ These are throwaway and gate decisions in the plan.
 
 Added in revision 7:
 
-- **The cure itself is unverified.** That a rename which edits no file is
+- **The cure itself is unverified.** That a rename which does not edit the
+  wrapped note is
   delivered by iCloud and Obsidian Sync without duplicating the note has not
   been run.
 - **The block renders through Obsidian's PDF viewer for embeds**, reached
@@ -673,8 +709,9 @@ Added in revision 7:
 - **Copy detection** depends on how Obsidian's own copy action creates the
   file; both routes are unverified.
 - **A wrapped note merged into another note loses its PDF.** Up to revision
-  6, Note composer's merge left an embed of the PDF in the target note, and
-  the "another note links to it" guard kept the PDF. The block names no PDF,
+  6, Note composer's merge was expected to leave an embed of the PDF in the
+  target note, so that the "another note links to it" guard kept the PDF
+  (never run in Obsidian). The block names no PDF,
   so after a merge nothing links to it and the followed delete removes it
   (the way the note was deleted, which may be permanent). The README says so;
   unverified.
@@ -685,13 +722,15 @@ Added in revision 7:
 ## Left to the builder
 
 - Module layout beyond "testable core, thin Obsidian layer, minimal `main.ts`".
-- Exact settle durations (informed by spike 2).
+- Exact settle durations (spike 2 would have informed them; the built values
+  are provisional).
 - The form of the Needs attention UI (modal or sidebar view) and of the
   visual marker on wrapper notes.
 - How copies are numbered when `Statement 1` exists.
 - Version number for the release.
-- Order of work, provided the settings fix and test setup come first and the
-  spikes run before the features they gate.
+- Order of work, provided the settings fix and test setup come first. (The
+  original condition that the spikes run before the features they gate was
+  dropped in revision 5.)
 
 ## What was removed in revision 7
 
@@ -726,5 +765,5 @@ Added in revision 7:
   settings as the user's switch.
 - Revision 6: an in-app copy of a wrapped note copies its PDF too.
 - Revision 7: name-independent pairing. The marker is a flag, the PDF is
-  shown by the `wrapped-pdf` block, and following edits no note. Change
+  shown by the `wrapped-pdf` block, and following does not edit the wrapped note. Change
   document: `2026-11-15-name-independent-pairing-design.md`.

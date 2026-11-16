@@ -20,6 +20,15 @@ Please read this before letting the plugin rename or delete your files.
 
 Back up your vault before trying it. Consider turning off the two "follow" settings (see [Following changes made in Obsidian](#following-changes-made-in-obsidian)) until you have seen the plugin behave in a test vault.
 
+## What to know before relying on it
+
+- **Without the plugin, a wrapped note does not show its PDF.** It shows an empty code block. The PDF is still beside the note under the same name.
+- **The PDF is not an outgoing link of its note.** Obsidian's graph, backlinks and "unused attachment" clean-up tools do not see the two as connected. Do not let such a tool delete the PDF.
+- **Merging a wrapped note into another note with Note composer deletes its PDF too.** The merge deletes the wrapped note inside Obsidian, and nothing else links to the PDF to keep it. The PDF goes wherever your "Deleted files" setting sends deleted files, which may be permanent. Unverified in Obsidian.
+- **Automatic wrapping can hold back silently, for a whole folder.** While any marked note in a folder has no PDF, no PDF that arrives in that folder from outside is wrapped automatically. No notice is shown; the PDFs stay listed as "Not wrapped" (see [Automatic wrapping](#automatic-wrapping)).
+- **Convert does not add the block.** It turns existing embeds of the PDF into the block. A note that had no embed shows no PDF afterwards until you add the block by hand (see [Convert](#convert)).
+- **Telling your own changes from synced ones is unverified.** Following renames, moves, copies and deletes depends on it. The two settings "Delete the PDF when its note is deleted in Obsidian" and "Rename and move the PDF with its note" turn following off if it misbehaves (see [What following relies on, and how it could go wrong](#what-following-relies-on-and-how-it-could-go-wrong)).
+
 ## What a wrapped note looks like
 
 A note made by the default template is this and nothing more:
@@ -36,7 +45,7 @@ wrapped-pdf: true
 - **`wrapped-pdf: true`** is the marker property. It says "this note wraps the PDF beside it". The name of the property is a setting.
 - **The `wrapped-pdf` block** is where the plugin shows the PDF. It is a code block with nothing in it. In reading view and in live preview the plugin draws, in its place, the PDF that has the note's name and sits in the note's folder.
 
-**Nothing in the note names the PDF.** The pair is found by name and folder alone: `Statement.md` wraps `Statement.pdf` in the same folder. So renaming, moving or copying a wrapped document changes file names only. No note is edited, on this device or any other, and sync has nothing to merge.
+**Nothing in the note names the PDF.** The pair is found by name and folder alone: `Statement.md` wraps `Statement.pdf` in the same folder. So renaming, moving or copying a wrapped document changes file names only. The wrapped note itself is not edited, on this device or any other, so sync has nothing to merge in it. Other notes are a different matter: if some other note links to the PDF, Obsidian updates that link when the PDF is renamed, as it does for any file (or asks first, if "Automatically update internal links" is off).
 
 Details:
 
@@ -45,7 +54,7 @@ Details:
 - The block works in any note. If no PDF with the note's name is beside it, it shows "No PDF named Statement.pdf beside this note." It redraws when the note or the PDF is renamed, moved, created or deleted. It never changes a file.
 - The block's content is ignored and reserved for later. There is no way to choose a page or a size.
 - Outside a note (for example in a canvas card) the block shows nothing.
-- The block uses Obsidian's own PDF viewer. If that viewer cannot be loaded, the block asks Obsidian to draw an ordinary embed of the PDF and puts a link to the PDF under it; if that fails too, it shows the link alone.
+- The block uses Obsidian's own PDF viewer. If that viewer cannot be loaded, the block asks Obsidian to draw an ordinary embed of the PDF and puts a link to the PDF under it; if that fails too, or if the PDF's path contains one of `# | [ ] ^` (which an embed cannot name), it shows the link alone.
 - Notes in your template folders (the configured template, the Templater template folder, the core Templates folder) are never treated as documents.
 
 All of this is unverified in Obsidian.
@@ -60,6 +69,8 @@ Put the PDF beside the note under the same name and add `wrapped-pdf: true` to t
 ````
 
 Do not link to or embed the PDF from its own note (see below).
+
+To unwrap a document, delete the `wrapped-pdf` property from the note (or use **Remove the marker** in the list when it is offered). The note and the PDF become two ordinary files; neither is deleted.
 
 ### A wrapped note must not link to its own PDF
 
@@ -90,7 +101,7 @@ The note always ends with the marker property set to `true`, whatever the templa
 
 A note is a wrapped document only if it has the marker property, so notes the plugin did not wrap are never touched.
 
-Wrapping is refused, with a notice saying why, when a note of that name already exists, when the PDF's name contains one of the characters `[ ] | # ^`, or when the PDF is already being wrapped.
+**Wrap PDF** and **Wrap active PDF** are not offered for a PDF that already has a note of the same name beside it, wrapped or not. (If a note appears at the last moment, or you use a **Wrap** button in the list after one has appeared, the wrap is refused with a notice naming the note.) A second wrap of a PDF that is already being wrapped is refused with a notice.
 
 ### Automatic wrapping
 
@@ -99,6 +110,8 @@ Wrapping is refused, with a notice saying why, when a note of that name already 
 - A PDF added inside Obsidian is wrapped after about 2 seconds.
 - A PDF that arrives from outside (Finder, another app, sync) waits 15 to 30 seconds, with a random element, so that two devices rarely wrap the same PDF. If a note for the PDF turns up in that time, nothing is wrapped.
 - **A PDF from outside is not wrapped while a marked note without its PDF is waiting for one.** When its wait is over, the plugin looks for a marked note that has no PDF and is either in the same folder as the new PDF or has the same name anywhere in the vault. If there is one, the PDF is left alone. This is what a renamed or moved document looks like on a second device while sync is still delivering it, PDF first and note later; wrapping the PDF then would make a second note. The PDF is not tried again. It stays listed as "Not wrapped": if its note arrives, the pair is simply whole; if it was a false alarm, wrap it from the list.
+- **This hold is silent and covers the whole folder.** No notice is shown (one line goes to the developer console). One "PDF not found" note in a folder, including a not yet converted note whose PDF is somewhere else, stops automatic wrapping of *every* PDF that arrives in that folder from outside, until you resolve that note. If new PDFs in a folder are not being wrapped, open the list and look for a "PDF not found" entry in that folder.
+- **Turning the switch on lists what is already there.** Every PDF in the vault that has no note beside it (outside a named attachment folder) then appears as "Not wrapped", and they are counted in the startup notice. They are not wrapped on their own; use **Wrap all** or leave them.
 - PDFs that land in a specifically named attachment folder (Settings, Files and links, Default location for new attachments) are skipped. Those are files pasted into other notes, not documents.
 - The new note is not opened. A notice says what was wrapped; when more than three PDFs are wrapped in one pass the notices are summarised into one.
 - PDFs that arrived while Obsidian was closed are not wrapped on their own. They appear in the Needs attention list as "Not wrapped", with **Wrap all**. **Wrap all** can run while automatic wrapping is working through the same PDFs; a PDF the other got to first is skipped quietly.
@@ -107,14 +120,14 @@ It can still happen that two devices both see a new PDF at the same moment (a sc
 
 ## Following changes made in Obsidian
 
-When you do these inside Obsidian on this device, both files follow (as far as the plugin can tell that the change was made here; see [What following relies on, and how it could go wrong](#what-following-relies-on-and-how-it-could-go-wrong)). Following only renames, moves, copies or deletes the other file. It never edits a note.
+When you do these inside Obsidian on this device, both files follow (as far as the plugin can tell that the change was made here; see [What following relies on, and how it could go wrong](#what-following-relies-on-and-how-it-could-go-wrong)). Following only renames, moves, copies or deletes the other file. It never edits the wrapped note. Because the other file is renamed the way Obsidian renames files, Obsidian updates the links that *other* notes hold to it; with "Automatically update internal links" off, Obsidian may show its "Update links?" prompt for the file that follows.
 
 | You do | The plugin does |
 |---|---|
 | Rename or move a wrapped note | Renames or moves its PDF to match. |
 | Rename or move the PDF | Renames or moves the note to match. |
 | Rename or move a folder holding wrapped documents | Nothing is needed: both files of each pair move together. |
-| Delete a wrapped note (or a folder holding wrapped documents) | Deletes its PDF too, in the same way (see below). The PDF is kept, with a notice, if another note links to or embeds it, as far as the plugin can tell at that moment; it is then listed with "Its note was deleted; the PDF was kept". The plugin asks Obsidian's link index and, because that index can lag a link added moments earlier, also reads the notes changed in the last 10 seconds. |
+| Delete a wrapped note (or a folder holding wrapped documents) | Deletes its PDF too, in the same way (see below). The PDF is kept, with a notice, if another note links to or embeds it, as far as the plugin can tell at that moment; it is then listed with "Its note was deleted; the PDF was kept". The plugin asks Obsidian's link index and, because that index can lag a link added moments earlier, also reads the notes changed in the last 10 seconds (the 20 most recently changed at most). |
 | Duplicate a wrapped document (file menu on the note, or the command **Duplicate wrapped document**) | Copies both files, named the way Obsidian names copies (`Statement 1.md` and `Statement 1.pdf`). Nothing else: the copies pair by name. |
 | Copy a wrapped note with Obsidian's own copy action ("Make a copy", or "Duplicate" in some versions), or any other in-app copy | Copies the PDF under the copy's name, beside the copy, when it can tell which document was copied (see below). Nothing is ever overwritten. The original is unaffected. |
 
@@ -155,10 +168,10 @@ Run **Show documents needing attention** to open the list (**Check wrapped docum
 
 | Entry | Meaning | Fixes |
 |---|---|---|
-| PDF not found | A marked note has no PDF with its name beside it. The PDF may not have downloaded yet. | **Use a PDF**: choose from the unwrapped PDFs in the note's folder, then those with the note's name elsewhere; the one you choose is moved beside the note and renamed to the note's name. **Rename note to match**: choose an unwrapped PDF in the note's folder; the note takes its name. **Copy another document's PDF**: choose a wrapped document; its PDF is copied under this note's name. **Remove the marker**: the note becomes an ordinary note. A fix that needs a choice is offered only when there is something to choose. |
+| PDF not found | A marked note has no PDF with its name beside it. The PDF may not have downloaded yet. | **Use a PDF**: choose from the unwrapped PDFs in the note's folder, then those with the note's name elsewhere; the one you choose is moved beside the note and renamed to the note's name. **Rename note to match**: choose an unwrapped PDF in the note's folder; the note takes its name. **Copy another document's PDF**: choose from the PDFs of your wrapped documents (the chooser lists the PDFs' paths); the one you choose is copied under this note's name. **Remove the marker**: the note becomes an ordinary note. A fix that needs a choice is offered only when there is something to choose. |
 | Links to its own PDF | A marked note still links to or embeds its PDF. It works as a pair but can be duplicated by sync when renamed. | **Convert** (see below). |
 | Its note was deleted; the PDF was kept | The note is gone and the PDF is left over: its note was removed outside Obsidian, deleted in Obsidian with "Delete the PDF when its note is deleted in Obsidian" off, or deleted in Obsidian while other notes still link to or embed the PDF. | **Keep as a plain PDF**; **Wrap**; **Delete the PDF** (asks first, then deletes the way Obsidian deletes files, following your "Deleted files" setting, which may be permanent). |
-| Not wrapped | A PDF with no marked note beside it. Shown only when automatic wrapping is on for this device. PDFs in a named attachment folder, and PDFs with a note of the same name beside them (which cannot be wrapped), are left out. | **Wrap** |
+| Not wrapped | A PDF with no marked note beside it. Shown only when automatic wrapping is on for this device. PDFs in a named attachment folder, PDFs with a note of the same name beside them (which cannot be wrapped), and a PDF that a not yet converted note's marker still points to, are left out. | **Wrap** |
 
 No fix ever overwrites a file. If the name it needs is taken, it is refused with a notice. If an entry has changed since it was listed, nothing is done, a notice says so, and the list is read again.
 
@@ -172,8 +185,8 @@ No fix ever overwrites a file. If the name it needs is taken, it is refused with
 
 Whether a file is moved:
 
-- **If a PDF with the note's name is already beside the note, Convert never moves a file.** If the old marker pointed at a different PDF, that PDF stays where it is. It is then an ordinary unwrapped PDF and shows as "Not wrapped" (when automatic wrapping is on).
-- If no PDF is beside the note and the old marker links to a PDF somewhere else, that PDF is first moved beside the note and renamed to the note's name. This is refused, with a notice, if that name is taken or if another note's marker points at the same PDF.
+- **If a PDF with the note's name is already beside the note, Convert never moves a file.** If the old marker pointed at a different PDF, that PDF stays where it is. It is then an ordinary unwrapped PDF and shows as "Not wrapped" (when automatic wrapping is on). Links and embeds of that other PDF in the note's text are kept as they are: it is another file.
+- If no PDF is beside the note and the old marker links to a PDF somewhere else, that PDF is first moved beside the note and renamed to the note's name. This is refused, with a notice, if that name is taken or if another note's marker points at the same PDF. Moving the PDF makes Obsidian rewrite the note's links to it, so after the move the plugin waits for Obsidian to finish (ten seconds at most) and reads the note's links to the PDF again from its text, and then converts those. One Convert is meant to do the whole job: PDF beside the note, marker `true`, links gone. Unverified in Obsidian.
 - If the marker's PDF belongs to another wrapped document (it sits beside that document's note under its name), Convert does not move it. The note is converted and then shows as "PDF not found".
 - If the marker's PDF does not exist, the note is converted and then shows as "PDF not found".
 
@@ -181,19 +194,26 @@ Whether a file is moved:
 
 Limits of Convert:
 
+- **Convert adds no block.** Only an existing embed of the PDF becomes the block. A note that had a link in its marker but no embed in its text shows no PDF after Convert. Add the block yourself, by typing these lines (three backticks and `wrapped-pdf`, then three backticks) where the PDF should show:
+
+  ````markdown
+  ```wrapped-pdf
+  ```
+  ````
+
 - Fenced code blocks (three backticks or tildes) and inline code are left alone. That is all it recognises: a link to the PDF inside a comment (`%% … %%`), a math block or an indented code block is **not** guaranteed to be left alone and may be changed too.
 - An embed inside a list item, a quote or a table cell is replaced by a block on its own lines, which breaks that list, quote or table. Check such notes afterwards.
 - A page or size on an embed (`![[Statement.pdf#page=3]]`) is lost.
 
 Notes wrapped by earlier test builds have a link in the marker and an embed in the text. They keep working as pairs and are listed with **Convert** and **Convert all**.
 
-**Wrap all** covers the "Not wrapped" entries, except PDFs whose names contain `[ ] | # ^` (their own **Wrap** button says why). **Convert all** and **Wrap all** each appear only when the list, as last checked, has entries they cover. **Wrap all** skips, without a notice, a PDF that another wrap got to first (automatic wrapping may be running at the same time), whose note has just appeared, or that cannot be wrapped, and goes on with the rest; it stops on any other failure, including a Templater template that created no note. Nothing destructive is ever the default.
+**Wrap all** covers the "Not wrapped" entries. **Convert all** and **Wrap all** each appear only when the list, as last checked, has entries they cover. **Wrap all** skips, without a notice, a PDF that another wrap got to first (automatic wrapping may be running at the same time), whose note has just appeared, or that cannot be wrapped, and goes on with the rest; it stops on any other failure, including a Templater template that created no note. Nothing destructive is ever the default.
 
 The "Its note was deleted; the PDF was kept" entries are kept in the plugin's data so that they survive a restart. They are only a reminder; losing them loses nothing else.
 
 ## One row in the file explorer
 
-With **Hide paired PDF files in the file explorer** on (the default), the PDF row of every wrapped document is hidden in the core file explorer, and the note's row shows a small "PDF" marker. This is done with generated styling rules that rely on how the explorer's rows are marked up in Obsidian's HTML. The plugin does not patch or call into the explorer's code. If an Obsidian update changes that markup, the hiding stops and the PDF rows reappear; pairing is unaffected.
+With **Hide paired PDF files in the file explorer** on (the default), the PDF row of every wrapped document is hidden in the core file explorer. The note's row of every wrapped document shows a small "PDF" marker, whether this setting is on or off. Both are done with generated styling rules that rely on how the explorer's rows are marked up in Obsidian's HTML. The plugin does not patch or call into the explorer's code. If an Obsidian update changes that markup, the hiding stops and the PDF rows reappear; pairing is unaffected.
 
 Limits:
 
@@ -242,7 +262,7 @@ The plugin does not read or write the `attachment` / `attachments` properties by
 
 ## Sync
 
-- **Renaming, moving or copying a wrapped document changes file names only.** No note is edited by the plugin, and Obsidian's own link updating has nothing to rewrite in the wrapped note, because the note holds no link to its PDF. This is the point of the current form. It has not been run on iCloud or Obsidian Sync yet.
+- **Renaming, moving or copying a wrapped document changes file names only.** The wrapped note is not edited by the plugin, and Obsidian's own link updating has nothing to rewrite in it, because the note holds no link to its PDF. This is the point of the current form. It has not been run on iCloud or Obsidian Sync yet.
 - Other notes that link to the PDF are still rewritten by Obsidian, on every device, when the PDF is renamed. That is ordinary Obsidian behaviour and is not expected to duplicate anything; unverified.
 - **Automatic wrapping is per device**, so you can run it on every device and fall back to a single one if conflicting notes appear.
 - The plugin is designed not to follow changes delivered by sync, so that two devices do not both rename the same PDF. Whether sync-delivered changes are always recognised as such has not been verified. While a rename is arriving piece by piece, the note may be listed as "PDF not found" for a moment; it is re-checked after a short wait and drops off the list once sync has delivered the other file. A sync that only adds or removes a note's marker property also leads to a re-check.
@@ -275,7 +295,8 @@ With both off, the plugin is designed to rename, move, copy or delete files only
 - Without the plugin a wrapped note shows an empty code block, not the PDF. The PDF is not an outgoing link of its note, is not connected to it in the graph, and may be flagged by "unused attachment" tools (see [What you give up](#what-you-give-up)).
 - The block has no options: no page, no size. Outside a note (a canvas card) it shows nothing.
 - Convert recognises fenced code blocks and inline code only; a link to the PDF in a comment, math or indented code may be changed. An embed inside a list item, quote or table cell is replaced by a block on its own lines. A page or size on an embed is lost (see [Convert](#convert)).
-- A PDF whose name contains `[ ] | # ^` cannot be wrapped. Rename it first.
+- A PDF whose name contains one of `[ ] | # ^` can be wrapped. Whether Obsidian or Templater accept creating a note with such a name is unverified; if they do not, the wrap fails with a notice. With `# | [ ] ^` in the path the block may show only a link to the PDF.
+- Convert adds no block to a note that had no embed of its PDF; add it by hand.
 - Merging a wrapped note into another note (Note composer) deletes its PDF with it, and renaming or copying a wrapped note onto the name of an existing PDF makes it wrap that PDF (see [Following changes made in Obsidian](#following-changes-made-in-obsidian)).
 - Hiding applies to the core file explorer only; the PDF still appears in the quick switcher, search, graph and third-party explorers. Popout windows are not styled.
 - One PDF per document. Other file types are not supported.
