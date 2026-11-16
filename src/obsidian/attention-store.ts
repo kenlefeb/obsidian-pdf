@@ -4,11 +4,11 @@ import { convertedSummary } from "../core/convert.ts";
 import { bulkResultMessage, nextPendingRemoved, noteBesidePdfMessage } from "../core/list-text.ts";
 import type { ListItem, MarkedNote, Pairing, RepairId, VaultSnapshot } from "../core/model.ts";
 import { pairUp } from "../core/pairing.ts";
-import { buildList, bulkWrapChecker, isBulkConvertible, isBulkWrappable, isCurrentItem, noteBesidePdf, planRepair } from "../core/repairs.ts";
+import { buildList, bulkConvertChecker, bulkWrapChecker, isBulkConvertible, isBulkWrappable, isCurrentItem, noteBesidePdf, planRepair } from "../core/repairs.ts";
 import { specificAttachmentFolder } from "../core/settings-data.ts";
 import { CONVERTED_NOTICE_MS, isTemplateProblem, WrapIncomplete, WrapMessage, WrapRefusal } from "../pdf-wrapper.ts";
 import type { Executor } from "./execute.ts";
-import { gatherVault } from "./vault-snapshot.ts";
+import { gatherNoteFolder, gatherVault } from "./vault-snapshot.ts";
 import { SETTLE_MS } from "./watcher.ts";
 
 /** Said when a repair is clicked on an entry that no longer describes the vault; the list is then read again. */
@@ -148,9 +148,19 @@ export class AttentionStore {
 	/**
 	 * Converts every entry "Convert all" covers: the notes that link to their own PDF and have it beside them, so no
 	 * file is moved. Resolves to the number converted.
+	 *
+	 * The entries are chosen once, from the pairs of the last refresh. Each is then checked again just before it is
+	 * converted, against its note and that note's folder read afresh (not the whole vault, which would make the run
+	 * quadratic): an entry that is no longer as listed is skipped. The list is read again once, when the run ends or stops.
 	 */
 	convertAll(): Promise<number> {
-		return this.bulkRun("convert", (item, _snapshot, pairing) => isBulkConvertible(item, pairing) ? "convert" : null);
+		const { app, settings } = this.plugin;
+		return this.bulkRun("convert", {
+			entries: () => this.list.filter(bulkConvertChecker(this.current)),
+			snapshotFor: (item) => item.notePath === null ? this.snapshot() : gatherNoteFolder(app, settings, item.notePath),
+			pick: (item, _snapshot, pairing) => isBulkConvertible(item, pairing) ? "convert" : null,
+			rescanEach: false,
+		});
 	}
 
 	/**
@@ -158,7 +168,13 @@ export class AttentionStore {
 	 * PDFs at the same time, so a PDF another wrap got to first is skipped, not a failure. Resolves to the number wrapped.
 	 */
 	wrapAll(): Promise<number> {
-		return this.bulkRun("wrap", (item, snapshot, pairing) => isBulkWrappable(item, snapshot, pairing) ? "wrap" : null);
+		return this.bulkRun("wrap", {
+			entries: () => [...this.list],
+			snapshotFor: () => this.snapshot(),
+			pick: (item, snapshot, pairing) => isBulkWrappable(item, snapshot, pairing) ? "wrap" : null,
+			// Lets listeners (the explorer styling) see progress while the run goes on.
+			rescanEach: true,
+		});
 	}
 
 	onChange(listener: () => void): () => void {
@@ -167,14 +183,20 @@ export class AttentionStore {
 	}
 
 	/**
-	 * Runs `pick`'s repair on each listed entry it accepts, one at a time, re-planning against a fresh snapshot
-	 * each time; an entry that has changed since it was listed is skipped. Stops at the first failure. Wraps run quietly: a refused wrap (another wrap got there first, or the
-	 * PDF cannot be wrapped) is skipped without a notice, and only another failure (including Templater handing back
-	 * no note) is reported here and stops the run.
+	 * Runs `pick`'s repair on each of `entries` it accepts, one at a time, re-planning each against the fresh
+	 * snapshot `snapshotFor` gives for it; an entry that has changed since it was listed is skipped. Stops at the first
+	 * failure. With `rescanEach` the list is read again after every entry done, otherwise once at the end. Wraps run
+	 * quietly: a refused wrap (another wrap got there first, or the PDF cannot be wrapped) is skipped without a
+	 * notice, and only another failure (including Templater handing back no note) is reported here and stops the run.
 	 */
 	private bulkRun(
 		kind: "convert" | "wrap",
-		pick: (item: ListItem, snapshot: VaultSnapshot, pairing: Pairing) => RepairId | null,
+		run: {
+			entries: () => ListItem[];
+			snapshotFor: (item: ListItem) => VaultSnapshot;
+			pick: (item: ListItem, snapshot: VaultSnapshot, pairing: Pairing) => RepairId | null;
+			rescanEach: boolean;
+		},
 	): Promise<number> {
 		return this.serial(async () => {
 			let done = 0;
@@ -184,14 +206,15 @@ export class AttentionStore {
 			// What wraps took out of the notes they made (links the template put in), to be said once for the run.
 			const converted: string[] = [];
 			try {
-				for (const item of [...this.list]) {
+				for (const item of run.entries()) {
 					if (this.unloaded) break;
-					const snapshot = this.snapshot();
+					const snapshot = run.snapshotFor(item);
 					// Paired once per snapshot, for both the pick and the plan.
 					const pairing = pairUp(snapshot);
-					const repair = pick(item, snapshot, pairing);
+					const repair = run.pick(item, snapshot, pairing);
 					if (repair === null) continue;
-					// Nothing to run: the entry has changed since it was listed, or the repair is refused. Skipped, not counted.
+					// Nothing to run: the entry has changed since it was listed, or the repair is refused. Skipped, not
+					// counted, and a refusal's notice is not shown; for wraps as for converts.
 					const actions = planRepair(item, repair, snapshot, undefined, pairing);
 					if (!actions.some((a) => a.type !== "notice")) continue;
 					needRescan = true;
@@ -224,9 +247,11 @@ export class AttentionStore {
 					}
 					if (counted) {
 						done++;
-						// Let listeners (the explorer styling) see progress while the run goes on; not through `serial`.
-						await this.rescan([]);
-						needRescan = false;
+						if (run.rescanEach) {
+							// Not through `serial`: this run is already inside it.
+							await this.rescan([]);
+							needRescan = false;
+						}
 					}
 				}
 			} catch (error) {
@@ -277,7 +302,7 @@ export class AttentionStore {
 			});
 			this.scanned = true;
 			this.bulk = {
-				convert: this.list.filter((item) => isBulkConvertible(item, pairing)).length,
+				convert: this.list.filter(bulkConvertChecker(pairing)).length,
 				// The same test "Wrap all" applies to each entry, so the button's presence matches what it would attempt;
 				// indexed once for this snapshot rather than scanning every note for every entry.
 				wrap: this.list.filter(bulkWrapChecker(snapshot, pairing)).length,

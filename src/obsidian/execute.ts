@@ -111,8 +111,7 @@ export class Executor {
 
 	private async convert(notePath: string, ownTargets: string[]): Promise<Outcome> {
 		const note = this.app.vault.getFileByPath(notePath);
-		// Gone: there is nothing left to convert.
-		if (!note) return "done";
+		if (!note) return "stale";
 		await this.withMark(notePath, "settled", () => convertNote(this.app, note, this.getSettings().markerProperty, ownTargets));
 		return "done";
 	}

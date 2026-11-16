@@ -4,6 +4,7 @@ import { pairUp } from "../../src/core/pairing.ts";
 import {
 	autoWrapChecker,
 	buildList,
+	bulkConvertChecker,
 	bulkWrapChecker,
 	copyCandidates,
 	describeConvert,
@@ -427,6 +428,21 @@ test("isBulkConvertible is true for every links-own-pdf entry whose PDF is besid
 	expect(isBulkConvertible(listed(s, "a/Both.md"), p)).toBe(true);   // its marker points elsewhere, but nothing moves
 	expect(isBulkConvertible(notFound("a/N.md"), p)).toBe(false);
 	expect(isBulkConvertible(listed(s, "a/S.md"), pairUp(snap([], [])))).toBe(false);
+});
+test("bulkConvertChecker answers for every entry of one pairing as isBulkConvertible does", () => {
+	const s = snap([
+		m("a/S.md", { ownTargets: ["S.pdf"] }),
+		m("a/Moved.md", { markerLink: "x/Old.pdf", linkedPdf: "x/Old.pdf", ownTargets: ["x/Old.pdf"] }),
+		m("a/N.md"),
+	], ["a/S.pdf", "x/Old.pdf", "a/Plain.pdf"]);
+	const p = pairUp(s);
+	const items = buildList(p, [], null);
+	const check = bulkConvertChecker(p);
+	expect(items.filter(check).map((item) => item.notePath)).toEqual(["a/S.md"]);
+	for (const item of items) expect(check(item)).toBe(isBulkConvertible(item, p));
+	// An entry of another kind is never covered, even when its note is in a healthy pair.
+	expect(check({ kind: "pdf-not-found", notePath: "a/S.md", pdfPath: null })).toBe(false);
+	expect(check({ kind: "links-own-pdf", notePath: null, pdfPath: null })).toBe(false);
 });
 
 // autoWrapChecker

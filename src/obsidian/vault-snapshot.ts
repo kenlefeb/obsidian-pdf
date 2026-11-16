@@ -76,6 +76,24 @@ export function gatherVault(app: App, settings: PdfWrapperSettings): VaultSnapsh
 }
 
 /**
+ * The vault narrowed to one note and its folder: the notes and PDFs directly in that folder, and the note itself when
+ * it is marked. Enough to ask whether that note is still paired and still links to its PDF as listed, without reading
+ * the whole vault. Empty when the note is gone.
+ */
+export function gatherNoteFolder(app: App, settings: PdfWrapperSettings, notePath: string): VaultSnapshot {
+	const snapshot: VaultSnapshot = { notePaths: [], pdfPaths: [], marked: [] };
+	const note = app.vault.getFileByPath(notePath);
+	if (note === null) return snapshot;
+	for (const file of note.parent?.children ?? []) {
+		if (isPdf(file.path)) snapshot.pdfPaths.push(file.path);
+		else if (isNote(file.path)) snapshot.notePaths.push(file.path);
+	}
+	const marked = readMarked(app, note, settings.markerProperty, templateLocations(app, settings));
+	if (marked) snapshot.marked.push(marked);
+	return snapshot;
+}
+
+/**
  * The spellings by which a note just made for `pdf` links to it. The note may not be indexed yet, so its text is
  * read: every link and embed target written in it, and the PDF's file name and vault path, each kept only if Obsidian
  * resolves it from the note to this very PDF (so a spelling in other letter case counts, and a link to any other file

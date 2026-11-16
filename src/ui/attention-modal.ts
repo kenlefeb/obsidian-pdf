@@ -108,8 +108,7 @@ export class AttentionModal extends Modal {
 			if (i === 0 && repair !== "remove-marker") button.setCta();
 			const choice = CHOICES[repair];
 			if (choice !== undefined) {
-				const candidates = choice.candidates(item, pairing);
-				button.onClick(() => new PdfChoiceModal(this.app, this.store, choice.placeholder, candidates,
+				button.onClick(() => new PdfChoiceModal(this.app, this.store, choice.placeholder, choice.candidates(item, pairing),
 					(pdf) => this.apply(item, repair, pdf)).open());
 			} else if (repair === "convert") {
 				button.onClick(() => new ConfirmModal(this.app, this.store, {

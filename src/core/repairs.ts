@@ -256,9 +256,16 @@ export function describeConvert(item: ListItem, pairing: Pairing): string {
 
 /** True when "Convert all" covers this entry: its PDF is already beside the note under its name, so converting it never moves a file. */
 export function isBulkConvertible(item: ListItem, pairing: Pairing): boolean {
-	if (item.kind !== "links-own-pdf" || item.notePath === null) return false;
-	const pair = pairOfNote(pairing, item.notePath);
-	return pair !== null && pair.pdfPath !== null;
+	return bulkConvertChecker(pairing)(item);
+}
+
+/**
+ * The test behind `isBulkConvertible`, for every entry of one pairing: indexes the healthy pairs' notes once, so each
+ * check takes constant time. For counting the entries of a whole list.
+ */
+export function bulkConvertChecker(pairing: Pairing): (item: ListItem) => boolean {
+	const withPdf = new Set(healthyPairs(pairing).map((pair) => pair.notePath));
+	return (item) => item.kind === "links-own-pdf" && item.notePath !== null && withPdf.has(item.notePath);
 }
 
 /**
