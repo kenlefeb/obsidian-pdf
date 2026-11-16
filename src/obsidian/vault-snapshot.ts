@@ -1,9 +1,10 @@
-import { getLinkpath, type App, type TFile } from "obsidian";
-import { convertBody, convertProperties } from "../core/convert.ts";
+import { getLinkpath, normalizePath, type App, type TFile } from "obsidian";
+import { convertBody, convertProperties, linkTargets } from "../core/convert.ts";
 import { isMarked, isTemplatePath, markerLinkTarget, type TemplateLocations } from "../core/marker.ts";
 import type { MarkedNote, VaultSnapshot } from "../core/model.ts";
 import { isNote, isPdf, samePair } from "../core/paths.ts";
 import type { PdfWrapperSettings } from "../core/settings-data.ts";
+import { templatePathWithExtension } from "../core/template.ts";
 import { getCoreTemplatesFolder, getTemplaterFolder } from "../pdf-wrapper.ts";
 
 /** A folder setting as a vault path: no surrounding spaces or slashes. "/" (the whole vault) becomes "". */
@@ -11,10 +12,13 @@ function folderPath(folder: string | null): string | null {
 	return folder === null ? null : folder.trim().replace(/^\/+|\/+$/g, "");
 }
 
-/** Where templates live: the configured template file, and the Templater and core Templates folders. */
+/**
+ * Where templates live: the configured template file, as the path `prepareTemplate` reads it from (so the template a
+ * wrap uses is the one left out of pairing), and the Templater and core Templates folders.
+ */
 export function templateLocations(app: App, settings: PdfWrapperSettings): TemplateLocations {
 	return {
-		templatePath: settings.templatePath.trim().replace(/^\/+/, ""),
+		templatePath: settings.templatePath.trim() === "" ? "" : normalizePath(templatePathWithExtension(settings.templatePath)),
 		templaterFolder: folderPath(getTemplaterFolder(app)),
 		coreTemplatesFolder: folderPath(getCoreTemplatesFolder(app)),
 	};
@@ -72,12 +76,14 @@ export function gatherVault(app: App, settings: PdfWrapperSettings): VaultSnapsh
 }
 
 /**
- * The spellings by which a note just made for `pdf` may link to it: the PDF's file name and its vault path, each only
- * if Obsidian resolves it from the note to this PDF and to no other file, plus whatever the metadata cache already
- * lists for the note. The note may not be indexed yet, so this does not depend on the cache.
+ * The spellings by which a note just made for `pdf` links to it. The note may not be indexed yet, so its text is
+ * read: every link and embed target written in it, and the PDF's file name and vault path, each kept only if Obsidian
+ * resolves it from the note to this very PDF (so a spelling in other letter case counts, and a link to any other file
+ * never does); plus whatever the metadata cache already lists for the note.
  */
-export function ownTargetsFor(app: App, note: TFile, pdf: TFile): string[] {
-	const targets = [pdf.name, pdf.path]
+export async function ownTargetsFor(app: App, note: TFile, pdf: TFile): Promise<string[]> {
+	const written = linkTargets(await app.vault.read(note));
+	const targets = [pdf.name, pdf.path, ...written]
 		.filter((target) => app.metadataCache.getFirstLinkpathDest(target, note.path)?.path === pdf.path);
 	return [...new Set([...targets, ...linkedTargets(app, note, (path) => path === pdf.path)])];
 }
@@ -110,17 +116,22 @@ export async function convertNote(
 	await app.fileManager.processFrontMatter(note, (frontmatter: Record<string, unknown>) => {
 		properties = convertProperties(frontmatter, markerProperty, ownTargets);
 	});
-	let embeds = 0;
-	let links = 0;
 	try {
-		await app.vault.process(note, (text) => {
-			const converted = convertBody(text, ownTargets);
-			embeds = converted.embeds;
-			links = converted.links;
-			return converted.text;
-		});
+		return { properties, ...(await convertNoteBody(app, note, ownTargets)) };
 	} catch (e) {
 		throw new BodyConvertError(e);
 	}
-	return { properties, embeds, links };
+}
+
+/** The body half of `convertNote` alone: embeds of the note's own PDF become the block, plain links to it text. */
+export async function convertNoteBody(app: App, note: TFile, ownTargets: string[]): Promise<{ embeds: number; links: number }> {
+	let embeds = 0;
+	let links = 0;
+	await app.vault.process(note, (text) => {
+		const converted = convertBody(text, ownTargets);
+		embeds = converted.embeds;
+		links = converted.links;
+		return converted.text;
+	});
+	return { embeds, links };
 }

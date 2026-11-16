@@ -5,7 +5,8 @@ import { classify } from "../core/classify.ts";
 import { buildAttention, bulkWrapChecker, fixesFor, isBulkFixable, isBulkWrappable, planFix } from "../core/fixes.ts";
 import { specificAttachmentFolder } from "../core/settings-data.ts";
 import type { AttentionItem, Classification, FixId, NoteClaim, Snapshot } from "../core/types.ts";
-import { isTemplateProblem, WrapIncomplete, WrapMessage, WrapRefusal } from "../pdf-wrapper.ts";
+import { convertedSummary } from "../core/convert.ts";
+import { CONVERTED_NOTICE_MS, isTemplateProblem, WrapIncomplete, WrapMessage, WrapRefusal } from "../pdf-wrapper.ts";
 import type { Executor } from "./execute.ts";
 import { gatherSnapshot } from "./snapshot.ts";
 import { SETTLE_MS } from "./watcher.ts";
@@ -162,6 +163,8 @@ export class AttentionStore {
 			let stopped = false;
 			// False only while the last in-loop rescan already shows the vault as this run left it.
 			let needRescan = true;
+			// What wraps took out of the notes they made (links the template put in), to be said once for the run.
+			const converted: string[] = [];
 			try {
 				for (const item of [...this.list]) {
 					if (this.unloaded) break;
@@ -175,7 +178,11 @@ export class AttentionStore {
 					try {
 						// False means a file vanished under us: that item is skipped, not counted, and the run goes on.
 						// Only a throw is a failure that stops the run.
-						counted = await this.executor.run(planFix(item, fix, snapshot, undefined, c), { skipAfterRun: true, quiet: kind === "wrap" });
+						counted = await this.executor.run(planFix(item, fix, snapshot, undefined, c), {
+							skipAfterRun: true,
+							quiet: kind === "wrap",
+							onConverted: (message) => converted.push(message),
+						});
 					} catch (error) {
 						if (error instanceof WrapRefusal && !isTemplateProblem(error)) {
 							// Automatic wrapping (or a click) is wrapping it, its note appeared, or it cannot be wrapped: skip it.
@@ -208,6 +215,8 @@ export class AttentionStore {
 				needRescan = true;
 			} finally {
 				if (!this.unloaded) new Notice(bulkResultMessage(kind, done, stopped));
+				const summary = convertedSummary(converted);
+				if (summary !== null && !this.unloaded) new Notice(summary, CONVERTED_NOTICE_MS);
 				if (needRescan) await this.rescan([]);
 				if (done > 0) this.scheduleFollowUp();
 			}

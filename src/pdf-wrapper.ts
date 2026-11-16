@@ -12,7 +12,7 @@ import {
 	templatePathWithExtension,
 	type TemplateCheck,
 } from "./core/template.ts";
-import { BodyConvertError, convertNote, ownTargetsFor } from "./obsidian/vault-snapshot.ts";
+import { BodyConvertError, convertNote, convertNoteBody, ownTargetsFor } from "./obsidian/vault-snapshot.ts";
 
 /** A wrap outcome whose message is complete and is shown as it is, without a "Failed to wrap" prefix. */
 export class WrapMessage extends Error {
@@ -102,6 +102,16 @@ export function existingSiblingNote(app: App, pdf: TFile, notePath: string = sib
 	return findPathIgnoringCase(siblings, notePath);
 }
 
+export interface WrapOptions {
+	/** Open the note afterwards. */
+	open: boolean;
+	/**
+	 * Given the message that says what the template had put in the note and was taken out again (links to the PDF), in
+	 * place of the notice a wrap otherwise shows for it. For a run over many PDFs, which shows it once.
+	 */
+	onConverted?: (message: string) => void;
+}
+
 /**
  * Creates `<name>.md` beside the PDF from the template, sets its marker to `true` and takes out of it any link to the
  * PDF that the template put there (the note must not name its PDF). The PDF is not moved. Throws a WrapRefusal when
@@ -113,7 +123,7 @@ export async function wrapPdf(
 	settings: PdfWrapperSettings,
 	saveSettings: () => Promise<void>,
 	pdfFile: TFile,
-	options: { open: boolean },
+	options: WrapOptions,
 ): Promise<TFile> {
 	const key = siblingNotePath(pdfFile).toLowerCase();
 	if (inFlight.has(key)) {
@@ -137,7 +147,7 @@ async function wrapOnce(
 	settings: PdfWrapperSettings,
 	saveSettings: () => Promise<void>,
 	pdfFile: TFile,
-	options: { open: boolean },
+	options: WrapOptions,
 ): Promise<TFile> {
 	if (!isLinkSafeName(pdfFile.path)) {
 		throw new WrapRefusal(`Cannot wrap ${pdfFile.name}: file names containing [ ] | # ^ cannot be linked. Rename the PDF first.`);
@@ -169,6 +179,7 @@ async function wrapOnce(
 	}
 
 	const note = created.file;
+	let targets: string[] | null = null;
 	let converted: Awaited<ReturnType<typeof convertNote>>;
 	try {
 		if (note.path !== notePath) {
@@ -177,7 +188,8 @@ async function wrapOnce(
 			await app.fileManager.renameFile(note, notePath);
 		}
 		// As Convert would: whatever the template made of the note, it ends marked and without a link to its PDF.
-		converted = await convertNote(app, note, settings.markerProperty, ownTargetsFor(app, note, pdfFile));
+		targets = await ownTargetsFor(app, note, pdfFile);
+		converted = await convertNote(app, note, settings.markerProperty, targets);
 	} catch (e) {
 		if (e instanceof BodyConvertError) {
 			const done = created.made ? "Created and marked" : "Marked";
@@ -186,12 +198,18 @@ async function wrapOnce(
 				note,
 			);
 		}
+		// The marker was not set. The links to the PDF are still taken out of the note's text when they can be, and the
+		// message says which of the two is left to do.
+		const textDone = await convertTextAnyway(app, note, targets);
 		throw created.made
-			? notMarked(note.path, pdfFile, settings.markerProperty, e)
-			: notMarkedFound(note.path, pdfFile, settings.markerProperty, e);
+			? notMarked(note.path, pdfFile, settings.markerProperty, e, textDone)
+			: notMarkedFound(note.path, pdfFile, settings.markerProperty, e, textDone);
 	}
 	const removed = convertedMessage(note.basename, converted.properties, converted.embeds, converted.links);
-	if (removed !== null) new Notice(removed, CONVERTED_NOTICE_MS);
+	if (removed !== null) {
+		if (options.onConverted) options.onConverted(removed);
+		else new Notice(removed, CONVERTED_NOTICE_MS);
+	}
 
 	if (options.open) {
 		try {
@@ -210,16 +228,42 @@ function refuseIfNoteExists(app: App, pdfFile: TFile, notePath: string): void {
 }
 
 /** How long the message about links the template put in stays up: it is long, and asks the user to change the template. */
-const CONVERTED_NOTICE_MS = 15000;
+export const CONVERTED_NOTICE_MS = 15000;
+
+/**
+ * After the properties of a new note could not be written: converts its text all the same. True when the text now has
+ * no link to the PDF that `targets` covers; false when that failed too, or the targets were never worked out.
+ */
+async function convertTextAnyway(app: App, note: TFile, targets: string[] | null): Promise<boolean> {
+	if (targets === null) return false;
+	try {
+		await convertNoteBody(app, note, targets);
+		return true;
+	} catch (e) {
+		console.warn("PDF Wrapper: could not replace the links to the PDF in", note.path, e);
+		return false;
+	}
+}
+
+/** What is left to do by hand in a note whose marker could not be set, given whether its text was converted. */
+function leftByHand(pdfFile: TFile, markerProperty: string, textDone: boolean): string {
+	return `set the "${markerProperty}" property to true by hand and take any link to ${pdfFile.name} out of ` +
+		`${textDone ? "its properties" : "the note"}`;
+}
+
+/** Said when the text of the note could not be converted either. */
+function textNotDone(pdfFile: TFile, textDone: boolean): string {
+	return textDone ? "" : ` The links to ${pdfFile.name} in its text were not replaced either.`;
+}
 
 /**
  * The note this wrap made (Templater handed it back, or the plugin created it) exists but carries no marker. It is not
  * deleted: the message tells the user what to do.
  */
-function notMarked(notePath: string, pdfFile: TFile, markerProperty: string, e: unknown): Error {
+function notMarked(notePath: string, pdfFile: TFile, markerProperty: string, e: unknown, textDone: boolean): Error {
 	return new Error(
-		`Created ${notePath} but could not mark it as wrapping ${pdfFile.name}: ${reason(e)}. ` +
-		`Delete the note and wrap again, or add the "${markerProperty}" property to it by hand.`,
+		`Created ${notePath} but could not mark it as wrapping ${pdfFile.name}: ${reason(e)}.${textNotDone(pdfFile, textDone)} ` +
+		`Delete the note and wrap again, or ${leftByHand(pdfFile, markerProperty, textDone)}.`,
 	);
 }
 
@@ -227,10 +271,11 @@ function notMarked(notePath: string, pdfFile: TFile, markerProperty: string, e: 
  * A note found at the note path after Templater ran, but not handed back by it, could not be marked. It is most likely
  * Templater's, but the plugin did not create it itself, so the message does not suggest deleting it.
  */
-function notMarkedFound(notePath: string, pdfFile: TFile, markerProperty: string, e: unknown): Error {
+function notMarkedFound(notePath: string, pdfFile: TFile, markerProperty: string, e: unknown, textDone: boolean): Error {
+	const left = leftByHand(pdfFile, markerProperty, textDone);
 	return new Error(
-		`Found ${notePath} after Templater ran, but could not mark it as wrapping ${pdfFile.name}: ${reason(e)}. ` +
-		`Add the "${markerProperty}" property to it by hand.`,
+		`Found ${notePath} after Templater ran, but could not mark it as wrapping ${pdfFile.name}: ${reason(e)}.` +
+		`${textNotDone(pdfFile, textDone)} ${left.charAt(0).toUpperCase()}${left.slice(1)}.`,
 	);
 }
 

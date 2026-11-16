@@ -9,7 +9,15 @@ import {
 	type WrapOutcome,
 } from "../core/auto-wrap.ts";
 import type { PdfWrapperSettings } from "../core/settings-data.ts";
-import { isTemplateProblem, onWrapSucceeded, WrapIncomplete, WrapMessage, WrapRefusal } from "../pdf-wrapper.ts";
+import { convertedSummary } from "../core/convert.ts";
+import {
+	CONVERTED_NOTICE_MS,
+	isTemplateProblem,
+	onWrapSucceeded,
+	WrapIncomplete,
+	WrapMessage,
+	WrapRefusal,
+} from "../pdf-wrapper.ts";
 import type { Executor } from "./execute.ts";
 import { gatherSnapshot } from "./snapshot.ts";
 
@@ -119,6 +127,8 @@ export class AutoWrapper {
 		if (this.running) return;
 		this.running = true;
 		const outcomes: WrapOutcome[] = [];
+		// What wraps took out of the notes they made (links the template put in), to be said once for the pass.
+		const converted: string[] = [];
 		let stopped: string | null = null;
 		try {
 			while (!this.unloaded) {
@@ -138,7 +148,7 @@ export class AutoWrapper {
 					break;
 				}
 				this.pending.delete(next);
-				const outcome = await this.wrapOne(next);
+				const outcome = await this.wrapOne(next, (message) => converted.push(message));
 				outcomes.push(outcome);
 				// Also after a failure: the note may have been created before a later step failed.
 				if (!this.unloaded) this.onWrapped();
@@ -160,13 +170,15 @@ export class AutoWrapper {
 		}
 		if (this.unloaded) return;
 		for (const message of summarizeWraps(outcomes)) new Notice(message);
+		const summary = convertedSummary(converted);
+		if (summary !== null) new Notice(summary, CONVERTED_NOTICE_MS);
 		if (stopped !== null) {
 			new Notice(stoppedMessage(stopped));
 		}
 	}
 
 	/** Never throws: a failure is an outcome, and the pass goes on. */
-	private async wrapOne(path: string): Promise<WrapOutcome> {
+	private async wrapOne(path: string, onConverted: (message: string) => void): Promise<WrapOutcome> {
 		const name = this.app.vault.getFileByPath(path)?.basename ?? path;
 		const slow = window.setTimeout(() => {
 			console.warn(`PDF Wrapper: wrapping ${path} has been running for more than ${SLOW_WRAP_MS / 1000} s; it may be waiting for a prompt.`);
@@ -174,7 +186,7 @@ export class AutoWrapper {
 		try {
 			// Quiet: the Executor would show a notice per failure; the pass shows one summary instead.
 			// skipAfterRun: the pass calls `onWrapped` itself after every wrap.
-			if (!(await this.executor.run([{ type: "wrap", pdfPath: path }], { quiet: true, skipAfterRun: true }))) return { kind: "skipped" };
+			if (!(await this.executor.run([{ type: "wrap", pdfPath: path }], { quiet: true, skipAfterRun: true, onConverted }))) return { kind: "skipped" };
 			return { kind: "wrapped", name };
 		} catch (error) {
 			if (error instanceof WrapIncomplete) return { kind: "incomplete", name, message: error.message };

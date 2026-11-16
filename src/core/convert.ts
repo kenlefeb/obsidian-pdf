@@ -88,6 +88,50 @@ export function convertBody(text: string, ownTargets: string[]): { text: string;
 	return { text: out, embeds, links };
 }
 
+/**
+ * The target of every link and embed in the text, properties and body alike (wikilink and markdown forms, `#subpath`
+ * and `|alias` removed, markdown targets URL-decoded), each once, in the order met. They are read as `convertBody`
+ * and `convertProperties` read them, so a target listed here is one they match when it is given as an own target.
+ * Fenced code blocks and inline code in the body are not read.
+ */
+export function linkTargets(text: string): string[] {
+	const targets = new Set<string>();
+	// Records every target and claims none, so the scan passes over each link and goes on.
+	const record: TargetTest = {
+		has: (target) => {
+			if (target !== "") targets.add(target);
+			return false;
+		},
+	};
+	let offset = bodyOffset(text);
+	if (offset === 0 && text.startsWith(BOM)) offset = BOM.length;
+	for (const line of text.slice(0, offset).split("\n")) scanLine(withoutCr(line), record);
+	let fence: { char: string; length: number } | null = null;
+	for (const raw of text.slice(offset).split("\n")) {
+		const line = withoutCr(raw);
+		if (fence !== null) {
+			if (closesFence(line, fence)) fence = null;
+			continue;
+		}
+		fence = openingFence(line);
+		if (fence === null) scanLine(line, record);
+	}
+	return [...targets];
+}
+
+function withoutCr(line: string): string {
+	return line.endsWith("\r") ? line.slice(0, -1) : line;
+}
+
+/** One notice for a run that wrapped several PDFs: the first note's message, and how many more notes it applied to. */
+export function convertedSummary(messages: string[]): string | null {
+	const first = messages[0];
+	if (first === undefined) return null;
+	const others = messages.length - 1;
+	if (others === 0) return first;
+	return `${first} The same was done in ${others} other ${others === 1 ? "note" : "notes"} wrapped in this run.`;
+}
+
 /** Sentence for the user after a wrap removed something the template put in; null when nothing was. */
 export function convertedMessage(noteName: string, properties: string[], embeds: number, links: number): string | null {
 	const done: string[] = [];
@@ -154,6 +198,11 @@ function markdownTarget(inner: string): string | null {
 	}
 }
 
+/** Says whether a link target is one of the note's own: a set of them, or anything that answers the same question. */
+interface TargetTest {
+	has(target: string): boolean;
+}
+
 /** The fence a line opens: three or more backticks or tildes, indented at most three spaces. */
 function openingFence(line: string): { char: string; length: number } | null {
 	const match = /^ {0,3}(`{3,}|~{3,})(.*)$/.exec(line);
@@ -176,7 +225,7 @@ function closesFence(line: string, fence: { char: string; length: number }): boo
  * characters are copied as written. A wikilink to anything else is copied whole, so what follows it is never read
  * as the target of a markdown link (`[[B.pdf]](A.pdf)` stays as written).
  */
-function scanLine(line: string, own: Set<string>): { parts: string[]; links: number } {
+function scanLine(line: string, own: TargetTest): { parts: string[]; links: number } {
 	if (!line.includes("[")) return { parts: [line], links: 0 };
 	const n = line.length;
 	const closeOf = line.includes("](") ? matchClosers(line) : null;

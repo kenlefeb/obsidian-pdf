@@ -1,5 +1,5 @@
 import { expect, test } from "vitest";
-import { convertBody, convertedMessage, convertProperties } from "../../src/core/convert.ts";
+import { convertBody, convertedMessage, convertedSummary, convertProperties, linkTargets } from "../../src/core/convert.ts";
 
 test("properties: list keeps other entries, single value emptied, marker true", () => {
 	const fm: Record<string, unknown> = { "wrapped-pdf": "[[A.pdf]]", attachments: ["[[Other.png]]", "[[A.pdf|scan]]", "[[sub/A.pdf]]"], source: "[[A.pdf]]", title: "A.pdf" };
@@ -155,4 +155,40 @@ test("message: names the note, the properties and the counts", () => {
 	expect(message).toContain("2 links ");
 	expect(convertedMessage("A", [], 0, 1)).toContain("1 link ");
 	expect(convertedMessage("A", [], 2, 0)).toContain("2 embeds ");
+});
+
+test("link targets: every link and embed in the properties and the body, as written, once each", () => {
+	const text = [
+		"---",
+		'wrapped-pdf: "[[Scan.pdf]]"',
+		"attachments:",
+		'  - "[[sub/Scan.pdf|scan]]"',
+		'  - "![[Other.png]]"',
+		"---",
+		"![[Scan.pdf#page=2]] and [[ Scan.pdf |alias]] and [[Note]]",
+		"[text](My%20Scan.pdf#page=3) ![x](<sub/My Scan.pdf> \"title\")",
+		"",
+	].join("\n");
+	expect(linkTargets(text)).toEqual(["Scan.pdf", "sub/Scan.pdf", "Other.png", "Note", "My Scan.pdf", "sub/My Scan.pdf"]);
+});
+
+test("link targets: code is not read, CRLF and a missing frontmatter are fine", () => {
+	expect(linkTargets("`[[A.pdf]]`\r\n```\r\n[[B.pdf]]\r\n```\r\n[[C.pdf]]\r\n")).toEqual(["C.pdf"]);
+	expect(linkTargets("no links here")).toEqual([]);
+	expect(linkTargets("")).toEqual([]);
+});
+
+test("link targets: what convertBody would match is what is listed", () => {
+	const text = "---\nx: 1\n---\n![[Scan.pdf]] [[scan.PDF|s]] [a](Scan.pdf)\n";
+	for (const target of linkTargets(text)) {
+		expect(convertBody(text, [target]).text).not.toBe(text);
+	}
+	expect(linkTargets(text)).toEqual(["Scan.pdf", "scan.PDF"]);
+});
+
+test("summary of the messages of a run: the first, and how many more notes", () => {
+	expect(convertedSummary([])).toBeNull();
+	expect(convertedSummary(["one"])).toBe("one");
+	expect(convertedSummary(["one", "two"])).toBe("one The same was done in 1 other note wrapped in this run.");
+	expect(convertedSummary(["one", "two", "three"])).toBe("one The same was done in 2 other notes wrapped in this run.");
 });

@@ -49,16 +49,16 @@ const PLACEHOLDER_LINK = /^(["']?)\[\[\s*\{\{(?:file|title)\}\}(?:\.pdf)?\s*\]\]
 // ![[target]], ![[target#subpath]], ![[target|alias]]
 const EMBED = /!\[\[([^\]|#]*)(?:#[^\]|]*)?(?:\|[^\]]*)?\]\]/g;
 
-// An embed target that is the note's title and nothing else, as core Templates or Templater writes it.
-const TITLE_ONLY = /^(?:\{\{(?:file|title)\}\}|<%[-_]?\s*tp\.file\.title\s*[-_]?%>)(?:\.pdf)?$/i;
+// An embed target whose file name (what follows the last "/") is the note's title and nothing else, as core Templates
+// or Templater writes it, with or without ".pdf".
+const TITLE_NAME = /(?:^|\/)(?:\{\{(?:file|title)\}\}|<%[-_]?\s*tp\.file\.title\s*[-_]?%>)(?:\.pdf)?$/i;
 
 /**
- * True for an embed target that stands for the note's own PDF: the note's title alone, or any target built from a
- * placeholder (`{{…}}` or `<% … %>`) that ends in `.pdf`. An embed of a fixed file is not one.
+ * True for an embed target that stands for the note's own PDF: its file name is the title placeholder, in any
+ * folder. An embed of a fixed file, or of a name built from anything else (`{{date}}.pdf`), is not one.
  */
 function isPlaceholderTarget(target: string): boolean {
-	const name = target.trim();
-	return TITLE_ONLY.test(name) || (/\{\{|<%/.test(name) && /\.pdf$/i.test(name));
+	return TITLE_NAME.test(target.trim());
 }
 
 /**

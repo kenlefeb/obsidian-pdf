@@ -6,10 +6,17 @@ import type { PdfWrapperSettings } from "../core/settings-data.ts";
 import { siblingNotePath, wrapPdf, WrapIncomplete, WrapMessage } from "../pdf-wrapper.ts";
 import { thenHook } from "../core/then-hook.ts";
 import { EmbedUpdateError, writeClaim } from "./snapshot.ts";
-import { convertNote } from "./vault-snapshot.ts";
+import { BodyConvertError, convertNote } from "./vault-snapshot.ts";
 
 /** The claim-based actions (until they are removed) and the actions of name-independent pairing. */
 type AnyAction = Action | FileAction;
+
+interface RunOptions {
+	quiet?: boolean;
+	skipAfterRun?: boolean;
+	/** Only with `quiet`: given the message of a wrap that took links to the PDF out of the note it made. */
+	onConverted?: (message: string) => void;
+}
 
 /** What became of one action: carried out, or skipped because a file it needs is no longer there. */
 type Outcome = "done" | "stale";
@@ -33,18 +40,21 @@ export class Executor {
 	 * On a failure it stops, shows a Notice naming the file and the reason, and rethrows.
 	 * With `skipAfterRun`, the `afterRun` hook is not called (the caller refreshes itself).
 	 * With `quiet`, a `wrap` action (and only that) shows no Notice of its own: its failure, and a WrapIncomplete
-	 * (the PDF is wrapped but a later step failed), are thrown for the caller to report.
+	 * (the PDF is wrapped but a later step failed), are thrown for the caller to report. Nor does it show the message
+	 * about links the template had put in the new note: that goes to `onConverted`, for the caller to show once for
+	 * its whole run (see `convertedSummary`), or to the console when there is none.
 	 */
-	async run(actions: AnyAction[], options: { quiet?: boolean; skipAfterRun?: boolean } = {}): Promise<boolean> {
-		const task = () => this.runAll(actions, options.quiet === true);
+	async run(actions: AnyAction[], options: RunOptions = {}): Promise<boolean> {
+		const task = () => this.runAll(actions, options);
 		return options.skipAfterRun === true ? task() : thenHook(task, this.afterRun);
 	}
 
-	private async runAll(actions: AnyAction[], quiet: boolean): Promise<boolean> {
+	private async runAll(actions: AnyAction[], options: RunOptions): Promise<boolean> {
+		const quiet = options.quiet === true;
 		for (const action of actions) {
 			let outcome: Outcome;
 			try {
-				outcome = await this.runOne(action, quiet);
+				outcome = await this.runOne(action, options);
 			} catch (error) {
 				if (!(quiet && action.type === "wrap")) new Notice(this.failureMessage(action, error));
 				throw error;
@@ -54,7 +64,7 @@ export class Executor {
 		return true;
 	}
 
-	private async runOne(action: AnyAction, quiet: boolean): Promise<Outcome> {
+	private async runOne(action: AnyAction, options: RunOptions): Promise<Outcome> {
 		switch (action.type) {
 			case "rename":
 				return this.rename(action.from, action.to);
@@ -71,7 +81,7 @@ export class Executor {
 			case "delete":
 				return this.delete(action.path);
 			case "wrap":
-				return this.wrap(action.pdfPath, quiet);
+				return this.wrap(action.pdfPath, options);
 			case "notice":
 				new Notice(action.message);
 				return "done";
@@ -147,14 +157,19 @@ export class Executor {
 		return "done";
 	}
 
-	private async wrap(pdfPath: string, quiet: boolean): Promise<Outcome> {
+	private async wrap(pdfPath: string, options: RunOptions): Promise<Outcome> {
+		const quiet = options.quiet === true;
+		// Not quiet: the wrap shows its own notice.
+		const onConverted = quiet
+			? options.onConverted ?? ((message: string) => console.warn(`PDF Wrapper: ${message}`))
+			: undefined;
 		const pdf = this.app.vault.getFileByPath(pdfPath);
 		if (!pdf) return "stale";
 		// Released once the wrap settles either way: if Templater created the note elsewhere and it was moved
 		// into place, no create event used the mark, and it must not linger.
 		const release = this.own.mark(siblingNotePath(pdf));
 		try {
-			await wrapPdf(this.app, this.getSettings(), this.saveSettings, pdf, { open: false });
+			await wrapPdf(this.app, this.getSettings(), this.saveSettings, pdf, { open: false, onConverted });
 		} catch (error) {
 			// The PDF is wrapped; only a later step failed. Say so and carry on.
 			if (quiet || !(error instanceof WrapIncomplete)) throw error;
@@ -212,7 +227,10 @@ export class Executor {
 			case "removeMarker":
 				return `Could not remove the "${marker}" property from ${action.notePath}: ${why}`;
 			case "convert":
-				return `Could not convert ${action.notePath}: ${why}`;
+				return error instanceof BodyConvertError
+					? `Set the "${marker}" property of ${action.notePath} to true and took its PDF out of the other properties, ` +
+						`but could not replace the links to the PDF in its text: ${why}`
+					: `Could not convert ${action.notePath}: ${why}`;
 			case "delete":
 				return `Could not delete ${action.path}: ${why}`;
 			case "wrap":

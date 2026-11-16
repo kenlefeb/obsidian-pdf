@@ -183,6 +183,10 @@ test("which embeds are placeholders for the PDF", () => {
 		"![[photo.png]]",
 		"![[<% tp.user.cover() %>]]",
 		"![[{{title}}.png]]",
+		"![[{{date}}.pdf]]",
+		"![[<% tp.user.other() %>.pdf]]",
+		"![[<% tp.file.title %>/<% tp.date.now() %>.pdf]]",
+		"![[{{title}} scan.pdf]]",
 		"[[{{title}}.pdf]]",
 		"{{title}}.pdf",
 	]) {
