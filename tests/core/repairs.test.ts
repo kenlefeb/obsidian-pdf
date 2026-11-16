@@ -26,11 +26,11 @@ const snap = (marked: MarkedNote[], pdfPaths: string[], plain: string[] = []): V
 const notFound = (notePath: string): ListItem => ({ kind: "pdf-not-found", notePath, pdfPath: null });
 const unwrapped = (pdfPath: string): ListItem => ({ kind: "unwrapped", notePath: null, pdfPath });
 const removed = (pdfPath: string): ListItem => ({ kind: "note-removed", notePath: null, pdfPath });
-/** The list entry for `notePath`, as buildList gives it for this snapshot. */
 const notice = (message: string) => [{ type: "notice", message }];
 const gone = (pdf: string) => notice(`${pdf} is no longer available. Pick again.`);
 const NOT_CHOSEN = notice("No PDF was chosen.");
 const NOT_OFFERED = notice("That cannot be done for this entry. Check the list again.");
+/** The list entry for `notePath`, as buildList gives it for this snapshot. */
 const listed = (s: VaultSnapshot, notePath: string): ListItem => {
 	const item = buildList(pairUp(s), [], null).find((entry) => entry.notePath === notePath);
 	if (item === undefined) throw new Error(`${notePath} is not listed`);
@@ -236,6 +236,11 @@ test("a repair that a current entry does not offer is refused with one notice", 
 	expect(planRepair(unwrapped("b/S.pdf"), "copy-pdf", s, "a/L.pdf")).toEqual(NOT_OFFERED);
 	expect(planRepair(notFound("a/N.md"), "convert", s)).toEqual(NOT_OFFERED);
 	expect(planRepair(notFound("a/N.md"), "wrap", s)).toEqual(NOT_OFFERED);
+	// "Delete the PDF" belongs to a PDF kept after its note was deleted, never to a note's entry.
+	expect(planRepair(notFound("a/N.md"), "delete-pdf", s)).toEqual(NOT_OFFERED);
+	expect(planRepair(listed(s, "a/L.md"), "delete-pdf", s)).toEqual(NOT_OFFERED);
+	const moved = snap([m("a/M.md", { markerLink: "x/Old.pdf", linkedPdf: "x/Old.pdf", ownTargets: ["x/Old.pdf"] })], ["x/Old.pdf"]);
+	expect(planRepair(listed(moved, "a/M.md"), "delete-pdf", moved)).toEqual(NOT_OFFERED);
 	expect(planRepair(listed(s, "a/L.md"), "remove-marker", s)).toEqual(NOT_OFFERED);
 	expect(planRepair(listed(s, "a/L.md"), "rename-note-to-pdf", s, "b/S.pdf")).toEqual(NOT_OFFERED);
 });
@@ -265,6 +270,28 @@ test("convert of a note that has its PDF beside it never moves or refuses, even 
 	const linked = { markerLink: "x/Old.pdf", linkedPdf: "x/Old.pdf", ownTargets: ["x/Old.pdf", "S.pdf"] };
 	const s = snap([m("a/S.md", linked), m("b/T.md", linked)], ["x/Old.pdf", "a/S.pdf"]);
 	expect(planRepair(listed(s, "a/S.md"), "convert", s)).toEqual([{ type: "convert", notePath: "a/S.md", ownTargets: ["x/Old.pdf", "S.pdf"] }]);
+});
+test("convert never moves a PDF that is another wrapped document's: it only converts", () => {
+	const linked = { markerLink: "b/T.pdf", linkedPdf: "b/T.pdf", ownTargets: ["b/T.pdf"] };
+	const onlyConvert = [{ type: "convert", notePath: "a/S.md", ownTargets: ["b/T.pdf"] }];
+	// The other note was already converted: its marker is true.
+	const converted = snap([m("a/S.md", linked), m("b/T.md")], ["b/T.pdf"]);
+	expect(planRepair(listed(converted, "a/S.md"), "convert", converted)).toEqual(onlyConvert);
+	// The other note still links to its PDF too.
+	const both = snap([m("a/S.md", linked), m("b/T.md", { markerLink: "T.pdf", linkedPdf: "b/T.pdf", ownTargets: ["T.pdf"] })], ["b/T.pdf"]);
+	expect(planRepair(listed(both, "a/S.md"), "convert", both)).toEqual(onlyConvert);
+	// Converting the other note first, then this one, moves nothing either way.
+	expect(planRepair(listed(both, "b/T.md"), "convert", both)).toEqual([{ type: "convert", notePath: "b/T.md", ownTargets: ["T.pdf"] }]);
+	// The owner's PDF has its extension in another case.
+	const upper = snap([m("a/S.md", { markerLink: "b/T.PDF", linkedPdf: "b/T.PDF", ownTargets: ["b/T.PDF"] }), m("b/T.md")], ["b/T.PDF"]);
+	expect(planRepair(listed(upper, "a/S.md"), "convert", upper)).toEqual([{ type: "convert", notePath: "a/S.md", ownTargets: ["b/T.PDF"] }]);
+});
+test("describeConvert names the other document whose PDF the marker points to, and says it stays", () => {
+	const s = snap([m("a/S.md", { markerLink: "b/T.pdf", linkedPdf: "b/T.pdf", ownTargets: ["b/T.pdf"] }), m("b/T.md")], ["b/T.pdf"]);
+	const text = describeConvert(listed(s, "a/S.md"), pairUp(s));
+	expect(text).toMatch(/^Convert S\.md: /);
+	expect(text).not.toMatch(/is moved to/);
+	expect(text).toMatch(/ b\/T\.pdf, which the marker points to, is the PDF of b\/T\.md and stays where it is\. No PDF named S\.pdf is beside this note, so it will then be listed as PDF not found\.$/);
 });
 test("convert is refused with one notice when the linked PDF's destination is taken", () => {
 	const linked = { markerLink: "x/Old.pdf", linkedPdf: "x/Old.pdf", ownTargets: ["x/Old.pdf"] };
@@ -313,6 +340,7 @@ test("a links-own-pdf entry is stale once the note's links have changed", () => 
 		{ markerLink: "Old.pdf", linkedPdf: "a/S.pdf", ownTargets: ["S.pdf"] },
 		{ markerLink: "S.pdf", linkedPdf: "x/Old.pdf", ownTargets: ["S.pdf"] },
 		{ markerLink: "S.pdf", linkedPdf: "a/S.pdf", ownTargets: ["S.pdf", "a/S.pdf"] },
+		{ markerLink: "S.pdf", linkedPdf: "a/S.pdf", ownTargets: ["a/S.pdf"] },
 		{},
 	];
 	for (const variant of variants) {
@@ -322,6 +350,12 @@ test("a links-own-pdf entry is stale once the note's links have changed", () => 
 	}
 	// Its PDF beside it has gone.
 	expect(isCurrentItem(item, { ...before, pdfPaths: ["x/Old.pdf"] })).toBe(false);
+});
+test("the order of a note's own targets never makes its entry stale", () => {
+	const s = (ownTargets: string[]) => snap([m("a/S.md", { ownTargets })], ["a/S.pdf"]);
+	const item = listed(s(["S.pdf", "a/S.pdf"]), "a/S.md");
+	expect(isCurrentItem(item, s(["a/S.pdf", "S.pdf"]))).toBe(true);
+	expect(planRepair(item, "convert", s(["a/S.pdf", "S.pdf"]))).toEqual([{ type: "convert", notePath: "a/S.md", ownTargets: ["a/S.pdf", "S.pdf"] }]);
 });
 test("isCurrentItem", () => {
 	const s = snap([m("a/N.md"), m("a/L.md", { ownTargets: ["L.pdf"] })], ["a/L.pdf", "b/S.pdf"]);

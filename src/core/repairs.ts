@@ -101,11 +101,17 @@ export function repairsFor(item: ListItem, pairing: Pairing): RepairId[] {
 	}
 }
 
+function sameSet(a: string[], b: string[]): boolean {
+	const inA = new Set(a);
+	const inB = new Set(b);
+	return inA.size === inB.size && [...inA].every((entry) => inB.has(entry));
+}
+
+/** Own targets are compared as sets: the order they were read in never makes an entry stale. */
 function sameLinks(a: OwnLinks, b: OwnLinks): boolean {
 	return a.markerLink === b.markerLink
 		&& a.linkedPdf === b.linkedPdf
-		&& a.ownTargets.length === b.ownTargets.length
-		&& a.ownTargets.every((target, i) => target === b.ownTargets[i]);
+		&& sameSet(a.ownTargets, b.ownTargets);
 }
 
 /**
@@ -131,12 +137,25 @@ function linkedPdfElsewhere(pair: Pair): string | null {
 	return linked !== null && linked !== pair.pdfPath ? linked : null;
 }
 
-function planConvert(pair: Pair, snapshot: VaultSnapshot): FileAction[] {
+/** The note of another healthy pair whose PDF this is: such a PDF is that document's and is never moved away from it. */
+function otherOwner(pdfPath: string, notePath: string, pairing: Pairing): string | null {
+	return pairing.pairs.find((other) => other.pdfPath === pdfPath && other.note.notePath !== notePath)?.note.notePath ?? null;
+}
+
+/**
+ * The linked PDF that Convert moves beside the note first: only for a note with no PDF beside it, and never a PDF that
+ * is another wrapped document's. Otherwise null, and the note is converted as it is.
+ */
+function pdfToMove(pair: Pair, pairing: Pairing): string | null {
+	const linked = pair.pdfPath === null ? linkedPdfElsewhere(pair) : null;
+	return linked !== null && otherOwner(linked, pair.note.notePath, pairing) === null ? linked : null;
+}
+
+function planConvert(pair: Pair, snapshot: VaultSnapshot, pairing: Pairing): FileAction[] {
 	const note = pair.note;
 	const notePath = note.notePath;
 	const actions: FileAction[] = [];
-	// A note that has its PDF beside it is converted as it is: a PDF its marker points to elsewhere stays there.
-	const from = pair.pdfPath === null ? linkedPdfElsewhere(pair) : null;
+	const from = pdfToMove(pair, pairing);
 	if (from !== null && snapshot.pdfPaths.includes(from)) {
 		const refused = (why: string): FileAction[] => [{ type: "notice", message: `Could not convert ${filename(notePath)}: ${why}` }];
 		const to = partnerDestination(notePath, from);
@@ -211,7 +230,7 @@ export function planRepair(item: ListItem, repair: RepairId, snapshot: VaultSnap
 		}
 		case "convert": {
 			const pair = offered && item.notePath !== null ? pairOfNote(p, item.notePath) : null;
-			return pair === null ? NOT_OFFERED : planConvert(pair, snapshot);
+			return pair === null ? NOT_OFFERED : planConvert(pair, snapshot, p);
 		}
 	}
 }
@@ -221,9 +240,8 @@ export function describeConvert(item: ListItem, pairing: Pairing): string {
 	const pair = item.kind === "links-own-pdf" && item.notePath !== null ? pairOfNote(pairing, item.notePath) : null;
 	if (pair === null) return "";
 	const notePath = pair.note.notePath;
-	// Only a note with no PDF beside it has its linked PDF moved there; otherwise that PDF stays where it is.
 	const linked = linkedPdfElsewhere(pair);
-	const from = pair.pdfPath === null ? linked : null;
+	const from = pdfToMove(pair, pairing);
 	const sentences: string[] = [];
 	if (from !== null) sentences.push(`${from} is moved to ${partnerDestination(notePath, from)}.`);
 	sentences.push(`Convert ${filename(notePath)}: the marker property is set to true, links to the PDF are removed from its other properties, `
@@ -231,6 +249,10 @@ export function describeConvert(item: ListItem, pairing: Pairing): string {
 		+ "and each link to it becomes plain text.");
 	if (pair.pdfPath !== null && linked !== null) {
 		sentences.push(`${filename(pair.pdfPath)} beside the note is its PDF; ${linked}, which the marker points to, stays where it is and is not wrapped.`);
+	}
+	const owner = pair.pdfPath === null && linked !== null ? otherOwner(linked, notePath, pairing) : null;
+	if (linked !== null && owner !== null) {
+		sentences.push(`${linked}, which the marker points to, is the PDF of ${owner} and stays where it is.`);
 	}
 	if (pair.pdfPath === null && from === null) {
 		sentences.push(`No PDF named ${filename(pdfBeside(notePath))} is beside this note, so it will then be listed as PDF not found.`);
@@ -278,15 +300,11 @@ function isLinkSafeName(path: string): boolean {
  * has it.
  */
 export function isBulkWrappable(item: ListItem, snapshot: VaultSnapshot, pairing?: Pairing): boolean {
-	if (item.kind !== "unwrapped" || item.pdfPath === null) return false;
-	const key = pairKey(item.pdfPath);
-	return isLinkSafeName(item.pdfPath)
-		&& !snapshot.notePaths.some((note) => isNote(note) && pairKey(note) === key)
-		&& isCurrentItem(item, snapshot, pairing);
+	return bulkWrapChecker(snapshot, pairing)(item);
 }
 
 /**
- * `isBulkWrappable` for every entry of one snapshot: indexes the snapshot once (the unwrapped PDFs, and the lower-cased
+ * The test behind `isBulkWrappable`, for every entry of one snapshot: indexes the snapshot once (the unwrapped PDFs, and the lower-cased
  * folder and base name of every note), so each check takes constant time. For counting the entries of a whole list.
  */
 export function bulkWrapChecker(snapshot: VaultSnapshot, pairing?: Pairing): (item: ListItem) => boolean {
