@@ -1,5 +1,5 @@
 import { expect, test } from "vitest";
-import { BLOCK_LANGUAGE, BLOCK_TEXT, hasBlock, noPdfMessage, blockView, sameBlockView } from "../../src/core/block.ts";
+import { BLOCK_LANGUAGE, BLOCK_TEXT, hasBlock, noPdfMessage, blockView, canEmbedByWikilink, sameBlockView } from "../../src/core/block.ts";
 
 test("block", () => {
 	expect(hasBlock("x\n```wrapped-pdf\n```\n")).toBe(true);
@@ -47,4 +47,11 @@ test("sameBlockView: unchanged PDF path, or the same missing-PDF message", () =>
 	expect(sameBlockView(blockView("a/S.md", []), { pdfPath: "a/S.pdf" })).toBe(false);
 	expect(sameBlockView(blockView("a/S.md", []), blockView("b/S.md", []))).toBe(true);
 	expect(sameBlockView(blockView("a/S.md", []), blockView("a/T.md", []))).toBe(false);
+});
+
+test("canEmbedByWikilink: not when the path has a character a wikilink gives meaning to", () => {
+	expect(canEmbedByWikilink("a/My doc (1).pdf")).toBe(true);
+	for (const path of ["a/S#1.pdf", "a/S|x.pdf", "a/[S.pdf", "a/S].pdf", "a/S^b.pdf"]) {
+		expect(canEmbedByWikilink(path)).toBe(false);
+	}
 });

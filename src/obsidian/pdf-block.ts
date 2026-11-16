@@ -9,8 +9,15 @@ import {
 	type TAbstractFile,
 	type TFolder,
 } from "obsidian";
-import { BLOCK_LANGUAGE, blockView, sameBlockView, type BlockView } from "../core/block.ts";
-import { dirname, isPdf } from "../core/paths.ts";
+import {
+	BLOCK_LANGUAGE,
+	blockView,
+	canEmbedByWikilink,
+	noPdfMessage,
+	sameBlockView,
+	type BlockView,
+} from "../core/block.ts";
+import { dirname, isNote, isPdf } from "../core/paths.ts";
 
 /**
  * Renders, in place of a `wrapped-pdf` code block, the PDF beside the note the block is in. The block's own content
@@ -34,7 +41,8 @@ const logged = new Set<string>();
 function logOnce(kind: string, message: string, error?: unknown): void {
 	if (logged.has(kind)) return;
 	logged.add(kind);
-	console.warn(`PDF Wrapper: ${message}`, error ?? "");
+	if (error === undefined) console.warn(`PDF Wrapper: ${message}`);
+	else console.warn(`PDF Wrapper: ${message}`, error);
 }
 
 class PdfBlock extends MarkdownRenderChild {
@@ -50,11 +58,18 @@ class PdfBlock extends MarkdownRenderChild {
 	}
 
 	onload(): void {
+		// Not in a note (a canvas card, no source path): draw nothing and watch nothing.
+		if (!isNote(this.sourcePath)) return;
 		this.redraw();
 		const vault = this.app.vault;
 		this.registerEvent(vault.on("create", (file) => this.onVaultChange(file, null)));
 		this.registerEvent(vault.on("rename", (file, oldPath) => this.onVaultChange(file, oldPath)));
 		this.registerEvent(vault.on("delete", (file) => this.onVaultChange(file, null, file)));
+	}
+
+	onunload(): void {
+		// Anything still loading finds the block has moved on and does nothing.
+		this.holder = null;
 	}
 
 	private notePath(): string {
@@ -85,7 +100,10 @@ class PdfBlock extends MarkdownRenderChild {
 			return;
 		}
 		const pdf = files.find((f) => f.path === view.pdfPath);
-		if (pdf === undefined) return;
+		if (pdf === undefined) {
+			this.containerEl.createDiv({ cls: "pdf-wrapper-block-missing", text: noPdfMessage(notePath) });
+			return;
+		}
 		if (!this.drawEmbed(pdf, holder)) void this.drawMarkdown(pdf);
 	}
 
@@ -137,21 +155,28 @@ class PdfBlock extends MarkdownRenderChild {
 		}
 	}
 
-	/** Fallback: let Obsidian render an embed of the PDF. If that fails too, a plain link. */
+	/**
+	 * Fallback: let Obsidian render an embed of the PDF, with a plain link under it, because the renderer does not
+	 * fail when it leaves an embed unloaded. Only the link when the path cannot be written as a wikilink or the
+	 * renderer throws.
+	 */
 	private async drawMarkdown(pdf: TFile): Promise<void> {
 		const holder = this.fresh();
-		try {
+		if (canEmbedByWikilink(pdf.path)) {
 			const el = this.containerEl.createDiv({ cls: "pdf-wrapper-block-pdf" });
-			await MarkdownRenderer.render(this.app, `![[${pdf.path}]]`, el, this.notePath(), holder);
-		} catch (error) {
-			logOnce("markdown-failed", "could not render the PDF embed; showing a link instead.", error);
-			if (this.holder === holder) this.drawLink(pdf);
+			try {
+				await MarkdownRenderer.render(this.app, `![[${pdf.path}]]`, el, this.notePath(), holder);
+			} catch (error) {
+				logOnce("markdown-failed", "could not render the PDF embed; showing a link instead.", error);
+				el.remove();
+			}
 		}
+		if (this.holder === holder) this.appendLink(pdf);
 	}
 
-	private drawLink(pdf: TFile): void {
-		this.fresh();
-		const link = this.containerEl.createEl("a", { cls: "internal-link", text: pdf.name, href: pdf.path });
+	private appendLink(pdf: TFile): void {
+		const line = this.containerEl.createDiv({ cls: "pdf-wrapper-block-link" });
+		const link = line.createEl("a", { cls: "internal-link", text: pdf.name, href: pdf.path });
 		link.setAttr("data-href", pdf.path);
 		link.addEventListener("click", (evt) => {
 			evt.preventDefault();

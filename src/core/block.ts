@@ -34,3 +34,8 @@ export function sameBlockView(a: BlockView, b: BlockView): boolean {
 	if (a.pdfPath !== null || b.pdfPath !== null) return a.pdfPath === b.pdfPath;
 	return a.message === b.message;
 }
+
+/** False when the path has a character a wikilink gives meaning to (`#`, `|`, `[`, `]`, `^`), so `![[path]]` would not name the file. */
+export function canEmbedByWikilink(path: string): boolean {
+	return !/[#|[\]^]/.test(path);
+}
